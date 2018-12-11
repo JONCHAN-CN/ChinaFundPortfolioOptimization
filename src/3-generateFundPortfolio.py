@@ -44,7 +44,7 @@ def preciseCorvariance(dbTable):
         count=count+1
         if count%5000 ==0:
             print("Calculating Covariance-[%d/ %f%%]..."%(count,count*100/corTotal))
-    print("Calculating Variance..."        
+    print("Calculating Variance..." )
     for c in itertools.combinations(dbTable.columns, 1):
         preCor = dbTable[c[0]].fillna(method = 'ffill').dropna()
         corMat.loc[c,c] = np.var(preCor.T)
