@@ -539,11 +539,11 @@ def main():
     '''5-EXPORT ALL TABLES'''
     # todo: 把EXPORT 归到每函数中
 #    try:
-#        pd.DataFrame(mySQL.queryData('fund_nav')).to_csv('../out/1-fund_nav.csv')
-#        pd.DataFrame(mySQL.queryData('fund_nav_currency')).to_csv('../out/1-fund_nav_currency.csv')
-#        pd.DataFrame(mySQL.queryData('fund_info')).to_csv('../out/1-fund_info.csv')        
-#        pd.DataFrame(mySQL.queryData('fund_managers_info')).to_csv('../out/1-fund_managers_info.csv')
-#        pd.DataFrame(mySQL.queryData('fund_managers_chg')).to_csv('../out/1-fund_managers_chg.csv')
+#        pd.DataFrame(mySQL.queryData('fund_nav')).to_csv('./out/1-fund_nav.csv')
+#        pd.DataFrame(mySQL.queryData('fund_nav_currency')).to_csv('./out/1-fund_nav_currency.csv')
+#        pd.DataFrame(mySQL.queryData('fund_info')).to_csv('./out/1-fund_info.csv')
+#        pd.DataFrame(mySQL.queryData('fund_managers_info')).to_csv('./out/1-fund_managers_info.csv')
+#        pd.DataFrame(mySQL.queryData('fund_managers_chg')).to_csv('./out/1-fund_managers_chg.csv')
 #    except Exception as e:
 #        msg = str('EXPORT ALL TABLES '+" %s" %e)       
 #        logger.exception(msg)        
