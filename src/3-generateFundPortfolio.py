@@ -14,7 +14,8 @@ import pandas as pd
 import itertools
 import logging
 from scipy.special import comb
-import time 
+import time
+import datetime
 
 logging.basicConfig(level=logging.INFO,
                     filename='../log/3-genFundPortfolio.log',
@@ -52,13 +53,26 @@ def preciseCorvariance(dbTable):
     msg = "Time used : "+str(end - start)
     logger.info(msg)
     return corMat
+
+def fitHM(dataTables,frequency='BQ-DEC',year = 7):
+    today = datetime.date.today()
+    goback = today - datetime.timedelta(days=year*365.25)
+    dataTable = dataTables.set_index('the_date')
+    dataTable.index = dataTable.index.astype('datetime64[D]')
+    dataTable = dataTable.fillna(method='bfill').resample(frequency).asfreq()
+    returns = dataTable.pct_change()
+    returns = returns.loc[goback:]
+    return returns
+
 # optimizer
-def optimalPortfolio(returns,nbr_assets):
+def optimalPortfolio(returns, nbr_assets):
     n = nbr_assets
-    returns = np.asmatrix(returns.T)
-	# scalar?
-    N = 100
-    mus = [10**(5.0 * t/N - 1.0) for t in range(N)] # TODO: what is this?
+    returns = returns.iloc[:, :nbr_assets]
+    returns = returns.T
+    returns = np.asmatrix(returns.values)
+
+    N = 100 # scalar?
+    mus = [10**(5.0 * t/N - 1.0) for t in range(N)] # what is this?
     
     # Convert to cvxopt matricess    
     S = opt.matrix(np.cov(returns)) # S-> covariance matrix  inhere   
@@ -81,23 +95,41 @@ def optimalPortfolio(returns,nbr_assets):
     wt = solvers.qp(opt.matrix(x1 * S), -pbar, G, h, A, b)['x']
     return np.asarray(wt), returns, risks
 
-def harryMarkowitz(nbr_assets,dataTable):
-	# Turn off progress printing 
+def harryMarkowitz(nbr_assets,navReturns):
+    # Turn off progress printing
     solvers.options['show_progress'] = False
-    
-    dataTable.set_index('the_date',inplace=True)
-    return_vec = dataTable.pct_change()	
-    # for dev
-    return_vec = return_vec.iloc[:,:nbr_assets]    
-    weights, returns, risks = optimalPortfolio(return_vec,nbr_assets)
-    print(return_vec.columns,weights, returns, risks)
+    # Cal each portfolio
+    comTotal = comb(navReturns.shape[1], nbr_assets)
+    count = 0
+    port = pd.DataFrame()
+    # port = pd.DataFrame(np.zeros(shape = [1,nbr_assets*2]))
+    start = time.time()
+    for col in itertools.combinations(navReturns.columns, nbr_assets):
+        try:
+            navReturn = navReturns[list(col)]
+            weights, returns, risks = optimalPortfolio(navReturn, nbr_assets)
+            fund = pd.DataFrame(list(col)).T
+            po = pd.DataFrame(data=weights.T)
+            port.append(pd.DataFrame(pd.concat([fund,po],axis = 1)),ignore_index=True)
+            print(navReturn.columns, weights, returns, risks)
+        except Exception as e:
+            msg = str("\n本组合计算失败：%s\n" % str(col))
+            # logger.exception(msg)
+        count = count+1
+        if count%100 ==0:
+            print("Calculating Portfolio-[%d/ %f%%]..."%(count,count*100/comTotal))
+    end = time.time()
+    msg = "Time used : " + str(end - start)
+    logger.info(msg)
+    return port
+
     
 ### Main ######################################################################
 def main():  
-    nav = pd.read_csv('../out/2.1-fund_nav-nav-B.csv')
-    # navRe = resampleData(nav,'M') # Table, Frequency
-    # navStat = calStat(navRe)
-    harryMarkowitz(4,nav)
+    nav = pd.read_csv('../out/2-fund_nav-nav-B.csv')
+    navReturns = fitHM(nav,'BQ-DEC', 8) # Table, Resample Frequency, Years to go
+    port = harryMarkowitz(5,navReturns)
+    port.to_csv('../out/3-port.csv')
     
 if __name__ == "__main__":
-    main()  
+    main()
