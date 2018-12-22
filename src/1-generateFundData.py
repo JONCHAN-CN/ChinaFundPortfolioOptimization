@@ -8,16 +8,18 @@
 # 使用库：requests、BeautifulSoup4、pymysql,pandas 
 # 作者：yuzhucu 
 '''  
-###############################################################################
-import requests  
-from bs4 import BeautifulSoup  
-import time  
-import random  
-import pymysql  
-import pandas as pd  
 import logging
+import random
 import sys
-# import os  
+import time
+
+import pandas as pd
+import pymysql
+###############################################################################
+import requests
+from bs4 import BeautifulSoup
+
+# import os
 # import re  
  
 logging.basicConfig(level=logging.INFO,
@@ -427,7 +429,8 @@ class FundSpiders():
     # 获取历史净值的总记录数(net)
     def getFundNavQuan(self,fund_code):
         try:
-             #http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=000001&page=1&per=1  
+             #http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=000001&page=1&per=1
+             logger.info("Processing NAV quantity ["+fund_code+ "]")
              fund_url='http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code='+fund_code +'&page=1&per=1'  
              res = getURL(fund_url)  
              records= (res.text.strip('var apidata=').strip('{;}').split(',')[1].strip('records:'))  
@@ -438,7 +441,7 @@ class FundSpiders():
             return 1
 # 功能选择对话
 def welcome():
-    logger.info('Plz input no. to execute commands:\n'
+    logger.info('\nPlz input no. to execute commands:\n'
           '1.Update all FUND INFO & MANAGER INFO(& export)\n'
           '2.Update all NAV INFO(& export)\n'
           '3.Update last 60 days NAV INFO(& export)\n'
@@ -581,7 +584,6 @@ def main():
         else :
             logger.info('Bye~')
             break
-
 
     ### close DB connection
     mySQL.cur.close()
