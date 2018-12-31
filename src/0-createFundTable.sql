@@ -2,61 +2,61 @@
 use fund;
 DROP TABLE IF  EXISTS fund_info ;
 CREATE TABLE IF NOT EXISTS `fund_info` (
-  `fund_code` varchar(255) NOT NULL COMMENT 'åŸºé‡‘ä»£ç ',
-  `fund_name` varchar(255) DEFAULT NULL COMMENT 'åŸºé‡‘å…¨ç§°',
-  `fund_abbr_name` varchar(255) DEFAULT NULL COMMENT 'åŸºé‡‘ç®€ç§°',
-  `fund_type` varchar(255) DEFAULT NULL COMMENT 'åŸºé‡‘ç±»å‹',
-  `issue_date` varchar(255) DEFAULT NULL COMMENT 'å‘è¡Œæ—¥æœŸ',
-  `establish_date` varchar(255) DEFAULT NULL COMMENT 'æˆç«‹æ—¥æœŸ',
-  `establish_scale` varchar(255) DEFAULT NULL COMMENT 'æˆç«‹æ—¥æœŸè§„æ¨¡',
-  `asset_value` varchar(255) DEFAULT NULL COMMENT 'æœ€æ–°èµ„äº§è§„æ¨¡',
-  `asset_value_date` varchar(255) DEFAULT NULL COMMENT 'æœ€æ–°èµ„äº§è§„æ¨¡æ—¥æœŸ',
-  `units` varchar(255) DEFAULT NULL COMMENT 'æœ€æ–°ä»½é¢è§„æ¨¡',
-  `units_date` varchar(255) DEFAULT NULL COMMENT 'æœ€æ–°ä»½é¢è§„æ¨¡æ—¥æœŸ',
-  `fund_manager` varchar(255) DEFAULT NULL COMMENT 'åŸºé‡‘ç®¡ç†äºº',
-  `fund_trustee` varchar(255) DEFAULT NULL COMMENT 'åŸºé‡‘æ‰˜ç®¡äºº',
-  `funder` varchar(255) DEFAULT NULL COMMENT 'åŸºé‡‘ç»ç†äºº',
-  `total_div` varchar(255) DEFAULT NULL COMMENT 'æˆç«‹æ¥åˆ†çº¢',
-  `mgt_fee` varchar(255) DEFAULT NULL COMMENT 'ç®¡ç†è´¹ç‡',
-  `trust_fee` varchar(255) DEFAULT NULL COMMENT 'æ‰˜ç®¡è´¹ç‡',
-  `sale_fee` varchar(255) DEFAULT NULL COMMENT 'é”€å”®æœåŠ¡è´¹ç‡',
-  `buy_fee` varchar(255) DEFAULT NULL COMMENT 'æœ€é«˜è®¤è´­è´¹ç‡',
-  `buy_fee2` varchar(255) DEFAULT NULL COMMENT 'æœ€é«˜ç”³è´­è´¹ç‡',
-  `benchmark` varchar(1000) DEFAULT NULL COMMENT 'ä¸šç»©æ¯”è¾ƒåŸºå‡†',
-  `underlying` varchar(500) DEFAULT NULL COMMENT 'è·Ÿè¸ªæ ‡çš„',
-  `data_source` varchar(255) DEFAULT 'eastmoney' COMMENT 'æ•°æ®æ¥æº',
-  `created_date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT 'åˆ›å»ºæ—¶é—´',
-  `updated_date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT 'æ›´æ–°æ—¶é—´',
-  `created_by` varchar(255) DEFAULT 'eastmoney' COMMENT 'åˆ›å»ºäºº',
-  `updated_by` varchar(255) DEFAULT 'eastmoney' COMMENT 'æ›´æ–°äºº',
+  `fund_code` varchar(255) NOT NULL COMMENT '»ù½ğ´úÂë',
+  `fund_name` varchar(255) DEFAULT NULL COMMENT '»ù½ğÈ«³Æ',
+  `fund_abbr_name` varchar(255) DEFAULT NULL COMMENT '»ù½ğ¼ò³Æ',
+  `fund_type` varchar(255) DEFAULT NULL COMMENT '»ù½ğÀàĞÍ',
+  `issue_date` varchar(255) DEFAULT NULL COMMENT '·¢ĞĞÈÕÆÚ',
+  `establish_date` varchar(255) DEFAULT NULL COMMENT '³ÉÁ¢ÈÕÆÚ',
+  `establish_scale` varchar(255) DEFAULT NULL COMMENT '³ÉÁ¢ÈÕÆÚ¹æÄ£',
+  `asset_value` varchar(255) DEFAULT NULL COMMENT '×îĞÂ×Ê²ú¹æÄ£',
+  `asset_value_date` varchar(255) DEFAULT NULL COMMENT '×îĞÂ×Ê²ú¹æÄ£ÈÕÆÚ',
+  `units` varchar(255) DEFAULT NULL COMMENT '×îĞÂ·İ¶î¹æÄ£',
+  `units_date` varchar(255) DEFAULT NULL COMMENT '×îĞÂ·İ¶î¹æÄ£ÈÕÆÚ',
+  `fund_manager` varchar(255) DEFAULT NULL COMMENT '»ù½ğ¹ÜÀíÈË',
+  `fund_trustee` varchar(255) DEFAULT NULL COMMENT '»ù½ğÍĞ¹ÜÈË',
+  `funder` varchar(255) DEFAULT NULL COMMENT '»ù½ğ¾­ÀíÈË',
+  `total_div` varchar(255) DEFAULT NULL COMMENT '³ÉÁ¢À´·Öºì',
+  `mgt_fee` varchar(255) DEFAULT NULL COMMENT '¹ÜÀí·ÑÂÊ',
+  `trust_fee` varchar(255) DEFAULT NULL COMMENT 'ÍĞ¹Ü·ÑÂÊ',
+  `sale_fee` varchar(255) DEFAULT NULL COMMENT 'ÏúÊÛ·şÎñ·ÑÂÊ',
+  `buy_fee` varchar(255) DEFAULT NULL COMMENT '×î¸ßÈÏ¹º·ÑÂÊ',
+  `buy_fee2` varchar(255) DEFAULT NULL COMMENT '×î¸ßÉê¹º·ÑÂÊ',
+  `benchmark` varchar(1000) DEFAULT NULL COMMENT 'Òµ¼¨±È½Ï»ù×¼',
+  `underlying` varchar(500) DEFAULT NULL COMMENT '¸ú×Ù±êµÄ',
+  `data_source` varchar(255) DEFAULT 'eastmoney' COMMENT 'Êı¾İÀ´Ô´',
+  `created_date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '´´½¨Ê±¼ä',
+  `updated_date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '¸üĞÂÊ±¼ä',
+  `created_by` varchar(255) DEFAULT 'eastmoney' COMMENT '´´½¨ÈË',
+  `updated_by` varchar(255) DEFAULT 'eastmoney' COMMENT '¸üĞÂÈË',
   PRIMARY KEY (`fund_code`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='åŸºé‡‘åŸºæœ¬ä¿¡æ¯è¡¨';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='»ù½ğ»ù±¾ĞÅÏ¢±í';
  
  
 DROP TABLE IF  EXISTS fund_managers_chg; 
 CREATE TABLE IF NOT EXISTS `fund_managers_chg` (
-	`fund_code` varchar(255) NOT NULL COMMENT 'åŸºé‡‘ä»£ç ',
-	`start_date` varchar(255) DEFAULT NULL COMMENT 'èµ·å§‹æœŸ',
-	`end_date` varchar(255) DEFAULT NULL COMMENT 'æˆªæ­¢æœŸ', 
-	`fund_managers` varchar(255) DEFAULT NULL COMMENT 'åŸºé‡‘ç»ç†',
-	`term` varchar(255) DEFAULT NULL COMMENT 'ä»»èŒæœŸé—´',
-	`return_rate` varchar(255) DEFAULT NULL COMMENT 'ä»»èŒå›æŠ¥',
-	`created_date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT 'åˆ›å»ºæ—¶é—´',
-	`updated_date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT 'æ›´æ–°æ—¶é—´',
-	`data_source` varchar(255) DEFAULT NULL COMMENT 'æ•°æ®æ¥æº',
+	`fund_code` varchar(255) NOT NULL COMMENT '»ù½ğ´úÂë',
+	`start_date` varchar(255) DEFAULT NULL COMMENT 'ÆğÊ¼ÆÚ',
+	`end_date` varchar(255) DEFAULT NULL COMMENT '½ØÖ¹ÆÚ', 
+	`fund_managers` varchar(255) DEFAULT NULL COMMENT '»ù½ğ¾­Àí',
+	`term` varchar(255) DEFAULT NULL COMMENT 'ÈÎÖ°ÆÚ¼ä',
+	`return_rate` varchar(255) DEFAULT NULL COMMENT 'ÈÎÖ°»Ø±¨',
+	`created_date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '´´½¨Ê±¼ä',
+	`updated_date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '¸üĞÂÊ±¼ä',
+	`data_source` varchar(255) DEFAULT NULL COMMENT 'Êı¾İÀ´Ô´',
 	PRIMARY KEY (`fund_code`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='åŸºé‡‘ç»ç†(based on fund)ä¿¡æ¯è¡¨';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='»ù½ğ¾­Àí±ä¶¯Ò»ÀÀ±í';
  
 DROP TABLE IF  EXISTS fund_managers_info;
- CREATE TABLE IF NOT EXISTS `fund_managers_info` (
-	`manager_id` varchar(255) NOT NULL COMMENT 'åŸºé‡‘ç»ç†ID',
-	`url` varchar(255) DEFAULT NULL COMMENT 'é“¾æ¥',
-	`manager_name` varchar(255) DEFAULT NULL COMMENT 'åŸºé‡‘ç»ç†',
-	`created_date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT 'åˆ›å»ºæ—¶é—´',
-	`updated_date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT 'æ›´æ–°æ—¶é—´',
-	`data_source` varchar(255) DEFAULT 'eastmoney' COMMENT 'æ•°æ®æº',
+CREATE TABLE IF NOT EXISTS `fund_managers_info` (
+	`manager_id` varchar(255) NOT NULL COMMENT '»ù½ğ¾­ÀíID',
+	`url` varchar(255) DEFAULT NULL COMMENT 'Á´½Ó',
+	`manager_name` varchar(255) DEFAULT NULL COMMENT '»ù½ğ¾­Àí',
+	`created_date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '´´½¨Ê±¼ä',
+	`updated_date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '¸üĞÂÊ±¼ä',
+	`data_source` varchar(255) DEFAULT 'eastmoney' COMMENT 'Êı¾İÔ´',
 	PRIMARY KEY (`manager_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='åŸºé‡‘ç»ç†(based on persons)ä¿¡æ¯è¡¨'; 
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='»ù½ğ¾­ÀíĞÅÏ¢»ù±í'; 
  
 DROP TABLE IF  EXISTS fund_nav ;
 CREATE TABLE IF NOT EXISTS `fund_nav` (
@@ -87,3 +87,24 @@ CREATE TABLE IF NOT EXISTS  `fund_nav_currency` (
   `updated_date` datetime DEFAULT NULL,
   PRIMARY KEY (`the_date`,`fund_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+DROP TABLE IF  EXISTS fund_managers_his;
+CREATE TABLE IF NOT EXISTS `fund_managers_his` (
+	`manager_id` varchar(255) NOT NULL COMMENT '»ù½ğ¾­ÀíID',
+	`manager_url` varchar(255) DEFAULT NULL COMMENT 'Á´½Ó',
+	`manager_name` varchar(255) DEFAULT NULL COMMENT '»ù½ğ¾­ÀíÃû³Æ',
+	`fund_code` varchar(255) DEFAULT NULL COMMENT '»ù½ğID',
+	`fund_name` varchar(255) DEFAULT NULL COMMENT '»ù½ğÃû³Æ',
+	`fund_type` varchar(255) DEFAULT NULL COMMENT '»ù½ğÀàĞÍ',
+	`fund_scale` varchar(255) DEFAULT NULL COMMENT '»ù½ğ¹æÄ££¨ÒÚÔª£©',
+	`start_date` varchar(255) DEFAULT NULL COMMENT 'ÆğÊ¼ÆÚ',
+	`end_date` varchar(255) DEFAULT NULL COMMENT 'Ö¹ÆÚ',
+	`term` varchar(255) DEFAULT NULL COMMENT 'ÈÎÆÚÊ±³¤',
+	`return_rate` varchar(255) DEFAULT NULL COMMENT '»Ø±¨ÂÊ',	
+	`updated_date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '¸üĞÂÊ±¼ä',
+	`data_source` varchar(255) DEFAULT 'eastmoney' COMMENT 'Êı¾İÔ´',
+	PRIMARY KEY (`manager_id`,`fund_code`,`start_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='»ù½ğ¾­ÀíÂÄÀú±í'; 
+
+
+
