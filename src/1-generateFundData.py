@@ -99,7 +99,7 @@ def getURL(url, tries_num=5, sleep_time=0, time_out=10, max_retry=5):
         # 设置重试次数，最大timeout 时间和 最长休眠时间
         if tries_num_p > 0:
             time.sleep(sleep_time_p)
-            msg = str(url + 'URL Connection Error: 第' + str(max_retry - tries_num_p) + '次 Retry Connection. %s' % e)
+            msg = str(url + '\nURL Connection Error: 第' + str(max_retry - tries_num_p) + '次 Retry Connection.')
             logger.exception(msg)
             return getURL(url, tries_num_p, sleep_time_p, time_out_p, max_retry)
 
@@ -168,7 +168,7 @@ class PyMySQL:
             logger.exception(msg)
             return 1
 
-    # 删除重复表数据 |定期手动？
+    # 删除重复表数据| DISCARD
     def distinctTable(self, table):
         # for nav only
         newTableName = table + '_unique'
@@ -189,9 +189,8 @@ class PyMySQL:
             msg = str("Table %s Update Failed: %s" % (table, e))
             logger.exception(msg)
 
-    # 清空表数据
+    # 清空表数据| DISCARD
     def truncateTable(self, table):
-        # for fund/manager only
         sql = "truncate table %s" % table
         logger.info('Executing %s' % sql)
         try:
@@ -219,6 +218,25 @@ class PyMySQL:
             return frame
         except Exception as e:
             msg = str("Fail to query NAV Quantity from %s" % table)
+            logger.exception(msg)
+            return 1
+
+    # 迁移库表
+    def migrateTable(self, dest,source):
+        try:
+            sql = "replace into %s select * from %s" % (dest,source)
+            result = self.cur.execute(sql)
+            insert_id = self.db.insert_id()
+            self.db.commit()
+            # 判断是否执行成功
+            if result:
+                return insert_id
+            else:
+                return 1
+        except Exception as e:
+            # 发生错误时回滚
+            self.db.rollback()
+            msg = str("Table Migrate Failed: %s" % e)
             logger.exception(msg)
             return 1
 
@@ -351,6 +369,7 @@ class FundSpiders():
     # 获取基金经理履历数据
     def getFundManagersHistory(self):
         manaList = pd.DataFrame(mySQL.queryData('fund_managers_info'))
+        # manaList = pd.DataFrame([['30544226','http://fund.eastmoney.com/manager/30544226.html','刘斐'],['30456606', 'http://fund.eastmoney.com/manager/30456606.html','施旭']],columns=['manager_id','url','manager_name'])
         manaList = manaList[['manager_id','url','manager_name']].drop_duplicates()
         mana_count = len(manaList)
         for i in range(mana_count):
@@ -359,18 +378,23 @@ class FundSpiders():
             mana_url = manaList.iloc[i,1]
             mana_name = manaList.iloc[i,2]
             res = getURL(mana_url)
-            #res = getURL('http://fund.eastmoney.com/manager/30337449.html')
+            # res = getURL('http: // fund.eastmoney.com / manager / 30544226.html')
+            res.encoding = 'UTF-8'
             soup = BeautifulSoup(res.text, 'html.parser')
+            div ="-"
+            if len(soup.find_all("div",class_="right jd "))>0:
+                div = soup.find_all("div",class_="right jd ")[0].text.split('任职起始日期：')[0].split('累计任职时间：')[1].strip()
             tables = soup.find_all("table")
             if len(tables)>1:
                 tab = tables[1]
-                manager_his = {}
                 for tr in tab.findAll('tr'):
+                    manager_his = {}
                     if tr.findAll('td'):
                         try:
                             manager_his['manager_id'] = mana_id
                             manager_his['manager_url'] = mana_url
                             manager_his['manager_name'] = mana_name
+                            manager_his['cum_on_duty_term'] = div
                             manager_his['fund_code'] = tr.select('td:nth-of-type(1)')[0].getText().strip()
                             manager_his['fund_name'] = tr.select('td:nth-of-type(2)')[0].getText().strip()
                             manager_his['fund_type'] = tr.select('td:nth-of-type(4)')[0].getText().strip()
@@ -386,6 +410,7 @@ class FundSpiders():
                             # msg = str("爬取失败")
                             logger.exception(msg)
                         try:
+                            # print(manager_his)
                             mySQL.insertData('fund_managers_his', manager_his)
                             msg = str(
                                 manager_his['manager_id'] + " " + manager_his['manager_url'] + " " + manager_his['manager_name']+ " " + manager_his['fund_code'] )
@@ -423,13 +448,13 @@ class FundSpiders():
             logger.exception(msg)
         # 如增量更新，取60个交易日数据
         if not update_flag:
-            pages = int(pages) + 1
+            pages = int(pages)
         else:
             pages = 3
 
         ## 根据基金代码和总记录数，分页返回所有历史净值(20 per page)
         i = 0  # 基金总record数
-        for pg in range(1, pages):
+        for pg in range(1, pages+1):
             fund_nav = 'http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=' + fund_code + '&page=' + str(pg) + '&per=' + records
             res = getURL(fund_nav)
             soup = BeautifulSoup(res.text, 'html.parser')
@@ -508,7 +533,7 @@ class FundSpiders():
             return 1
 
 
-# 更新库表
+# 更新库表| DISCARD
 def updateTable(tab):
     try:
         mySQL.distinctTable(tab)
@@ -568,15 +593,18 @@ def welcome():
                 '1.Update all FUND INFO & MANAGER INFO(& export)\n'
                 '2.Update all NAV INFO(& export)\n'
                 '3.Update last 60 days NAV INFO(& export)\n'
-                '4.Just Tidy up NAV INFO\n'
+                '4.Update all MANAGER HISTORY(& export)\n'
                 '5.Just Check NAV INFO\n'
                 '6.Export all TABLES\n'
-                '9.Exit\n'
+                '7.Update ONE FUND INFO & MANAGER INFO(& export)\n'
+                '8.Update ONE NAV INFO(& export)\n'
+                '9.Update ONE MANAGER HISTORY(& export)\n'
+                '0.Exit\n'
                 '\n'
                 'Command NO.: ')
-    n = int(sys.stdin.readline().strip('\n'))
-    if n in [1, 2, 3, 4, 5, 7, 9]:
-        return n
+    n = sys.stdin.readline().strip('\n')
+    if int(n) in [0,1, 2, 3, 4, 5, 6,7, 8,9]:
+        return int(n)
     else:
         logger.info('INVALID INPUT\n')
         welcome()
@@ -601,30 +629,26 @@ def main():
         n = welcome()
         if n == 1:
             # 1.Update all FUND INFO & MANAGER INFO(& export)
-            # truncate
-            for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg','fund_managers_his']:
-                mySQL.truncateTable(tab)
+            # # truncate
+            # for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg','fund_managers_his']:
+            #      mySQL.truncateTable(tab)
             # scape & import
             for fund in funds:
-                count = count + 1
-                logger.info("\nProcessing [%d/%d] Funds" % (count, fund_count))
-                try:
-                    fundSpiders.getFundInfo(fund)  # fund info 全量
-                except Exception as e:
-                    msg = str('GET FUND INFO FROM EASTMONEY [' + fund + '] \n' + " %s" % e)
-                    logger.exception(msg)
-                try:
-                    fundSpiders.getFundManagers(fund)  # manager info, 全量
-                except Exception as e:
-                    msg = str('GET MANAGER INFO FROM EASTMONEY [' + fund + '] \n' + " %s" % e)
-                    logger.exception(msg)
+                 count = count + 1
+                 logger.info("\nProcessing [%d/%d] Funds" % (count, fund_count))
+                 try:
+                     fundSpiders.getFundInfo(fund)  # fund info 全量
+                 except Exception as e:
+                     msg = str('GET FUND INFO FROM EASTMONEY [' + fund + '] \n' + " %s" % e)
+                     logger.exception(msg)
+                 try:
+                     fundSpiders.getFundManagers(fund)  # manager info, 全量
+                 except Exception as e:
+                     msg = str('GET MANAGER INFO FROM EASTMONEY [' + fund + '] \n' + " %s" % e)
+                     logger.exception(msg)
             # export
             for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg']:
-                exportTable(tab)
-            # scape & import
-            fundSpiders.getFundManagersHistory()  # manager history, 全量
-            # export
-            exportTable('fund_managers_his')
+                 exportTable(tab)
         elif (n == 2 or n == 3):
             # 2.Update all NAV INFO(& export)/3.Update last 60 days NAV INFO(& export)
             # scape & import
@@ -637,22 +661,28 @@ def main():
                 except Exception as e:
                     msg = str('GET NAV INFO FROM EASTMONEY [' + fund + '] \n' + " %s" % e)
                     logger.exception(msg)
-            # update
-            for tab in ['fund_nav', 'fund_nav_currency']:
-                updateTable(tab)
+            # # update
+            # for tab in ['fund_nav', 'fund_nav_currency']:
+            #     updateTable(tab)
             # check
             checkNAV(funds)
             # export
             for tab in ['fund_nav', 'fund_nav_currency']:
                 exportTable(tab)
+        # elif n == 4:
+        #     # 4.Just Tidy up NAV INFO
+        #     # update
+        #     for tab in ['fund_nav', 'fund_nav_currency']:
+        #         updateTable(tab)
+        #     # export
+        #     for tab in ['fund_nav', 'fund_nav_currency']:
+        #         exportTable(tab)
         elif n == 4:
-            # 4.Just Tidy up NAV INFO
-            # update
-            for tab in ['fund_nav', 'fund_nav_currency']:
-                updateTable(tab)
+            # 4.Update all MANAGER HISTORY(& export)
+            # scape & import
+            fundSpiders.getFundManagersHistory()  # manager history, 全量
             # export
-            for tab in ['fund_nav', 'fund_nav_currency']:
-                exportTable(tab)
+            exportTable('fund_managers_his')
         elif n == 5:
             # 5.Just Check NAV INFO
             # check
@@ -660,10 +690,45 @@ def main():
         elif n == 6:
             # 6.Export all TABLES
             # export
-            for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg', 'fund_nav', 'fund_nav_currency']:
+            for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg', 'fund_nav', 'fund_nav_currency','fund_managers_his']:
                 exportTable(tab)
         elif n == 7:
-            logger.info('Preserved SECTION')
+            # 7.Update ONE FUND INFO & MANAGER INFO(& export)
+            logger.info('\nPlz input FUND_CODE:\n')
+            fund = sys.stdin.readline().strip('\n')
+            if len(fund) ==6:
+                try:
+                    fundSpiders.getFundInfo(fund)  # fund info
+                except Exception as e:
+                    msg = str('GET FUND INFO FROM EASTMONEY [' + fund + '] \n' + " %s" % e)
+                    logger.exception(msg)
+                try:
+                    fundSpiders.getFundManagers(fund)  # manager info
+                except Exception as e:
+                    msg = str('GET MANAGER INFO FROM EASTMONEY [' + fund + '] \n' + " %s" % e)
+                    logger.exception(msg)
+                # export
+                for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg']:
+                    exportTable(tab)
+            else:
+                logger.exception('INVALID INPUT\n')
+        elif n == 8:
+            # 8.Update ONE NAV INFO(& export)
+            logger.info('\nPlz input FUND_CODE:\n')
+            fund = sys.stdin.readline().strip('\n')
+            if len(fund) ==6:
+                try:
+                    fundSpiders.getFundNav(fund, update_flag= False)  # nav info, update_flag = False(全量)/True(增量)
+                except Exception as e:
+                    msg = str('GET NAV INFO FROM EASTMONEY [' + fund + '] \n' + " %s" % e)
+                    logger.exception(msg)
+                # export
+                for tab in ['fund_nav', 'fund_nav_currency']:
+                    exportTable(tab)
+            else:
+                logger.exception('INVALID INPUT\n')
+        elif n == 9:# TODO
+            print('TBC')
         else:
             logger.info('Bye~')
             break
