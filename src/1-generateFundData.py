@@ -7,6 +7,8 @@
 # 使用库：requests、BeautifulSoup4、pymysql,pandas 
 # 作者：yuzhucu 
 '''
+from gevent import monkey
+monkey.patch_all()
 import logging
 import random
 import sys
@@ -16,9 +18,11 @@ import pandas as pd
 import pymysql
 import requests
 from bs4 import BeautifulSoup
+import threading
+import queue
+import urllib3
+import socket
 
-# import os
-# import re
 
 logging.basicConfig(level=logging.INFO,
                     filename='../log/1-generateFundData.log',
@@ -69,8 +73,8 @@ def randHeader():
 def getCurrentTime():
     return time.strftime('[%Y-%m-%d %H:%M:%S]', time.localtime(time.time()))
 
-
-def getURL(url, tries_num=5, sleep_time=0, time_out=10, max_retry=5):
+# 获取网页
+def getURL(url, tries_num=5, sleep_time=5, time_out=10, max_retry=5):
     '''
         这里重写get函数，主要是为了实现网络中断后自动重连，同时为了兼容各种网站不同的反爬策略及，通过sleep时间和timeout动态调整来测试合适的网络连接参数；
         通过isproxy 来控制是否使用代理，以支持一些在内网办公的同学
@@ -90,18 +94,43 @@ def getURL(url, tries_num=5, sleep_time=0, time_out=10, max_retry=5):
             res = requests.get(url, headers=header, timeout=time_out, proxies=proxy)
         else:
             res = requests.get(url, headers=header, timeout=time_out)
-        res.raise_for_status()  # 如果响应状态码不是 200，就主动抛出异常
+        # res.raise_for_status()  # 如果响应状态码不是 200，就主动抛出异常
         return res
-    except requests.RequestException as e:
-        sleep_time_p = sleep_time_p + 10
-        time_out_p = time_out_p + 10
-        tries_num_p = tries_num_p - 1
-        # 设置重试次数，最大timeout 时间和 最长休眠时间
+    except (socket.timeout or urllib3.exceptions.ReadTimeoutError or requests.exceptions.ReadTimeout  )as e:  # TODO error msg
+        sleep_time_p = sleep_time_p + 5
+        time_out_p = time_out_p + 5
+        tries_num_p = tries_num_p - 1 # 设置重试次数，最大timeout 时间和 最长休眠时间
         if tries_num_p > 0:
             time.sleep(sleep_time_p)
-            msg = str(url + '\nURL Connection Error: 第' + str(max_retry - tries_num_p) + '次 Retry Connection.')
-            logger.exception(msg)
+            logger.exception(str(url + '\nURL Connection Error: 第' + str(max_retry - tries_num_p) + '次 Retry Connection.'))
             return getURL(url, tries_num_p, sleep_time_p, time_out_p, max_retry)
+
+
+class MyThread(threading.Thread):
+    def __init__(self, func):
+        super(MyThread, self).__init__()  # 调用父类的构造函数
+        self.func = func  # 传入线程函数逻辑
+    def run(self):
+        self.func()
+
+# TODO make it general
+def singleThread():
+    global queuePool
+    while True :
+        if not queuePool.empty():
+            item = queuePool.get()  #获得任务
+            try:
+                fundSpiders.getFundNav(item[0], item[1],True,True)  # nav info, update = False(全量)/True(增量),silent_flag, multiflag
+                queuePool.task_done()
+                logger.info('[' + item[0] + '] Done!\n')
+                time.sleep(2)
+            except Exception as e:
+                logger.exception(str('GET NAV INFO FROM EASTMONEY [' + item[0] + ']\n' + " %s" % e))
+            # res = queuePool.qsize()  # 判断消息队列大小
+            # if res > 0:
+            #     logger.info("%d tasks to do..." % (res))
+        else:
+            break
 
 
 class PyMySQL:
@@ -109,19 +138,29 @@ class PyMySQL:
     def getCurrentTime(self):
         return time.strftime('[%Y-%m-%d %H:%M:%S]', time.localtime(time.time()))
 
-    # 数据库初始化
-    def _init_(self, host, user, passwd, db, port=3306, charset='utf8'):
-        pymysql.install_as_MySQLdb()
-        try:
-            self.db = pymysql.connect(host=host, user=user, passwd=passwd, db=db, port=3306, charset='utf8')
-            self.db.ping(True)  # 使用mysql ping来检查连接,实现超时自动重新连接
-            msg = "MySQL DB Connect Success: " + user + '@' + host + ':' + str(port) + '/' + db
+    __v = None
 
-            logger.info(msg)
-            self.cur = self.db.cursor()
-        except  Exception as e:
-            msg = str("MySQL DB Connect Error: %s" % e)
-            logger.exception(msg)
+    def __init__(self, host=None, user=None, passwd=None, db=None,port=None, charset=None, maxconn=5):
+        self.host, self.port, self.user, self.passwd, self.db, self.charset = host, port, user, passwd, db, charset
+        self.maxconn = maxconn
+        self.pool = queue.Queue(maxconn)
+        for i in range(maxconn):
+            try:
+                self.conn = pymysql.connect(host=self.host, port=self.port, user=self.user, passwd=self.passwd, db=self.db, charset=self.charset)
+                # self.conn.autocommit(True)
+                self.conn.ping(True)  # 使用mysql ping来检查连接,实现超时自动重新连接
+                self.cur = self.conn.cursor()  # self.cursor=self.conn.cursor(cursor=pymysql.cursors.DictCursor)
+                self.pool.put(self.conn)
+            except Exception as e:
+                raise IOError(e)
+
+    @classmethod
+    def get_instance(cls, *args, **kwargs):
+        if cls.__v:
+            return cls.__v
+        else:
+            cls.__v = PyMySQL(*args, **kwargs)
+            return cls.__v
 
     # 插入数据
     def insertData(self, table, my_dict):
@@ -131,23 +170,18 @@ class PyMySQL:
             sql = "replace into %s (%s) values (%s)" % (table, cols, '"' + values + '"')
             try:
                 result = self.cur.execute(sql)
-                insert_id = self.db.insert_id()
-                self.db.commit()
-                # 判断是否执行成功
-                if result:
-                    # print (self.getCurrentTime(), u"Data Insert Sucess")
+                insert_id = self.conn.insert_id()
+                self.conn.commit()
+                if result:  # 判断是否执行成功
                     return insert_id
                 else:
                     return 1
             except Exception as e:
-                # 发生错误时回滚
-                self.db.rollback()
-                msg = str("Data Insert Failed: %s" % e)
-                logger.exception(msg)
+                self.conn.rollback()  # 发生错误时回滚
+                logger.exception(str("Data Insert Failed: %s" % e))
                 return 1
         except Exception as e:
-            msg = str("MySQLdb Error: %s" % e)
-            logger.exception(msg)
+            logger.exception(str("MySQLdb Error: %s" % e))
             return 1
 
     # 查询数据
@@ -168,6 +202,26 @@ class PyMySQL:
             logger.exception(msg)
             return 1
 
+    # 建表
+    def createTable(self, table,sourceTab,mode = 'like'):
+        if mode == 'like':
+            sql = "create table %s like %s" % (table,sourceTab)
+            logger.info('Executing %s' % sql)
+            try:
+                result = self.cur.execute(sql)
+                self.conn.commit()
+                # 判断是否执行成功
+                if result:
+                    msg = str("Table %s Create Succeed!" % table)
+                    logger.info(msg)
+            except Exception as e:
+                # 发生错误时回滚
+                self.conn.rollback()
+                msg = str("Table %s Create Failed: %s" % (table, e))
+                logger.exception(msg)
+        else:
+            logger.exception('More create table mode TBC~')
+
     # 删除重复表数据| DISCARD
     def distinctTable(self, table):
         # for nav only
@@ -178,14 +232,14 @@ class PyMySQL:
             AN = self.cur.execute(sqlAssureNew)
             if AN:
                 result = self.cur.execute(sql)
-                self.db.commit()
+                self.conn.commit()
                 # 判断是否执行成功
                 if result:
                     msg = str("Table %s Update Succeed!" % table)
                     logger.info(msg)
         except Exception as e:
             # 发生错误时回滚
-            self.db.rollback()
+            self.conn.rollback()
             msg = str("Table %s Update Failed: %s" % (table, e))
             logger.exception(msg)
 
@@ -195,16 +249,37 @@ class PyMySQL:
         logger.info('Executing %s' % sql)
         try:
             result = self.cur.execute(sql)
-            self.db.commit()
+            self.conn.commit()
             # 判断是否执行成功
             if result:
                 msg = str("Table %s Truncate Succeed!" % table)
                 logger.info(msg)
         except Exception as e:
             # 发生错误时回滚
-            self.db.rollback()
+            self.conn.rollback()
             msg = str("Table %s Truncate Failed: %s" % (table, e))
             logger.exception(msg)
+
+    # 删表
+    def dropTable(self, table):
+        cfm = bool(input('Plz confirm to DROP table %s :'%table))
+        if cfm :
+            sql = "drop table if exists %s" % table
+            logger.info('Executing %s' % sql)
+            try:
+                result = self.cur.execute(sql)
+                self.conn.commit()
+                # 判断是否执行成功
+                if result:
+                    msg = str("Table %s Drop Succeed!" % table)
+                    logger.info(msg)
+            except Exception as e:
+                # 发生错误时回滚
+                self.conn.rollback()
+                msg = str("Table %s Drop Failed: %s" % (table, e))
+                logger.exception(msg)
+        else:
+            logger.exception('STOP by user.')
 
     # 查询库中NAV数据量
     def queryNAVQuantity(self, table):
@@ -226,8 +301,8 @@ class PyMySQL:
         try:
             sql = "replace into %s select * from %s" % (dest,source)
             result = self.cur.execute(sql)
-            insert_id = self.db.insert_id()
-            self.db.commit()
+            insert_id = self.conn.insert_id()
+            self.conn.commit()
             # 判断是否执行成功
             if result:
                 return insert_id
@@ -235,7 +310,7 @@ class PyMySQL:
                 return 1
         except Exception as e:
             # 发生错误时回滚
-            self.db.rollback()
+            self.conn.rollback()
             msg = str("Table Migrate Failed: %s" % e)
             logger.exception(msg)
             return 1
@@ -249,7 +324,7 @@ class FundSpiders():
     # 从csv文件中获取基金代码清单（可从wind或者其他财经网站导出）
     def getFundCodesFromCsv(self):
         # file_path=os.path.join(os.getcwd(),'fundCode.csv')
-        file_path = "../dep/1-fundCode.csv"
+        file_path = "../dep/1-fundCode_slave.csv"
         # fund_code = pd.read_csv(file_path,encoding='gbk')
         fund_code = pd.read_csv(file_path, dtype=str)
         Code = fund_code.fund_code
@@ -423,39 +498,41 @@ class FundSpiders():
 
 
     # 获取基金净值数据
-    def getFundNav(self, fund_code, update_flag=False):
+    def getFundNav(self, fund_code, update=False, silent = False, multi= False):
         '''''
         因为基金列表中是所有基金代码，一般净值型基金和货币基金数据稍有差异，下面根据数据表格长度判断是一般基金还是货币基金，分别入库
         :param fund_code:
         :return:
         '''
-        fund_url = 'http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=' + fund_code + '&page=1&per=20' # http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=000001&page=1&per=1
+        global count_down
+        count_down = count_down + 1
+        logger.info("Processing [%d/%d] Funds" % (count_down, fund_count))
+        fund_url = 'http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=' + fund_code + '&page=1&per=45' # http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=000001&page=1&per=45
         pages = 0
         records = 0
-        ## 获取历史净值的总记录数与页数
+
+        # 获取历史净值的总记录数与页数
         try:
-            ''''' 
-             #获取单个基金的第一页数据，里面返回的apidata 接口中包含了记录数、分页及数据文件等 
-             #这里暂按照字符串解析方式获取，既然是标准API接口，应该可以通过更高效的方式批量获取全部净值数据，待后续研究。这里传入基金代码、分页页码和每页的记录数。先简单查询一次获取总的记录数，再一次性获取所有历史净值 
-             首次初始化完成后，如果后续每天更新或者定期更新，只要修改下每页返回的记录参数即可 
+            '''
+            获取单个基金的第一页数据，里面返回的apidata 接口中包含了记录数、分页及数据文件等 
+            这里暂按照字符串解析方式获取，既然是标准API接口，应该可以通过更高效的方式批量获取全部净值数据，待后续研究。
+            首次初始化完成后，如果后续每天更新或者定期更新，只要修改下每页返回的记录参数即可 
             '''
             res = getURL(fund_url)
             records = (res.text.strip('var apidata=').strip('{;}').split(',')[1].strip('records:'))
             pages = (res.text.strip('var apidata=').strip('{;}').split(',')[2].strip('pages:'))
         except  Exception as e:
-            # print (self.getCurrentTime(),'getFundNav1', fund_code,fund_url,e )
-            msg = str("爬取记录总数失败: [" + fund_code + "] " + fund_url + " %s" % e)
-            logger.exception(msg)
+            logger.exception(str("爬取记录总数失败: [" + fund_code + "] " + fund_url + " %s" % e))
         # 如增量更新，取60个交易日数据
-        if not update_flag:
+        if not update:
             pages = int(pages)
         else:
-            pages = 3
+            pages = 1
 
-        ## 根据基金代码和总记录数，分页返回所有历史净值(20 per page)
+        # 根据基金代码和总记录数，分页返回所有历史净值
         i = 0  # 基金总record数
         for pg in range(1, pages+1):
-            fund_nav = 'http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=' + fund_code + '&page=' + str(pg) + '&per=' + records
+            fund_nav = 'http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=' + fund_code + '&page=' + str(pg) + '&per=49'
             res = getURL(fund_nav)
             soup = BeautifulSoup(res.text, 'html.parser')
             result = {}
@@ -477,19 +554,22 @@ class FundSpiders():
                         result['sell_state'] = tr.select('td:nth-of-type(6)')[0].getText().strip()
                         result['div_record'] = tr.select('td:nth-of-type(7)')[0].getText().strip().strip('\'')
                     except  Exception as e:
-                        msg = str("解析历史记录失败: [" + fund_code + "] " + fund_url + " %s" % e)
-
-                        logger.exception(msg)
+                        logger.exception(str("解析历史记录失败: [" + fund_code + "] " + fund_url + " %s" % e))
                     try:
-                        mySQL.insertData('fund_nav', result)
-                        msg = str("[" + result['fund_code'] + "] " + str(i) + '/' + str(records) + " " + result[
-                            'the_date'] + " " + result['nav'] + " " + result['add_nav'] + " " + result[
-                                      'nav_chg_rate'] + " " + result['buy_state'] + " " + result['sell_state'] + " " +
-                                  result['div_record'])
-                        logger.info(msg)
+                        if multi:
+                            obj.insertData('fund_nav_slave', result)
+                        else:
+                            mySQL.insertData('fund_nav', result)
+                        if silent:
+                            pass
+                        else:
+                            msg = str("[" + result['fund_code'] + "] " + str(i) + '/' + str(records) + " " + result[
+                                'the_date'] + " " + result['nav'] + " " + result['add_nav'] + " " + result[
+                                          'nav_chg_rate'] + " " + result['buy_state'] + " " + result['sell_state'] + " " +
+                                      result['div_record'])
+                            logger.info(msg)
                     except  Exception as e:
-                        msg = str("入库失败: [" + fund_code + "] " + fund_url + " %s" % e)
-                        logger.exception(msg)
+                        logger.exception(str("入库失败: [" + fund_code + "] " + fund_url + " %s" % e))
                 # 如果是货币基金，获取万份收益和7日年化利率
                 elif tr.findAll('td') and len((tr.findAll('td'))) == 6:
                     i = i + 1
@@ -505,19 +585,22 @@ class FundSpiders():
                         msg = str("解析历史记录失败: [" + fund_code + "] " + fund_url + " %s" % e)
                         logger.exception(msg)
                     try:
-                        mySQL.insertData('fund_nav_currency', result)
-                        msg = str("[" + result['fund_code'] + "] " + str(i) + '/' + str(records) + " " + result[
-                            'the_date'] + " " + result['profit_per_units'] + " " + result['profit_rate'] + " " + result[
-                                      'buy_state'] + " " + result['sell_state'])
-                        logger.info(msg)
+                        if multi:
+                            obj.insertData('fund_nav_currency_slave', result)
+                        else:
+                            mySQL.insertData('fund_nav_currency', result)
+                        if silent:
+                            pass
+                        else:
+                            msg = str("[" + result['fund_code'] + "] " + str(i) + '/' + str(records) + " " + result[
+                                'the_date'] + " " + result['profit_per_units'] + " " + result['profit_rate'] + " " + result[
+                                          'buy_state'] + " " + result['sell_state'])
+                            logger.info(msg)
                     except  Exception as e:
-                        msg = str("入库失败: [" + fund_code + "] " + fund_url + " %s" % e)
-                        logger.exception(msg)
+                        logger.exception(str("入库失败: [" + fund_code + "] " + fund_url + " %s" % e))
                 else:
                     pass
-        msg = str("[" + fund_code + "] " + '共' + str(i) + '/' + str(records) + '行数保存成功')
-        logger.info(msg)
-        return 0
+        logger.info(str("[" + fund_code + "] " + '共' + str(i) + '/' + str(records) + '行数保存成功'))
 
     # 获取历史净值的总记录数(net)
     def getFundNavQuan(self, fund_code):
@@ -612,26 +695,23 @@ def welcome():
 
 # MAIN
 def main():
-    global mySQL, fundSpiders, sleep_time, isproxy, proxy, header
-    mySQL = PyMySQL()
-    mySQL._init_('localhost', 'root', 'JONC', 'fund')  # host/user/password/database
+    global mySQL,obj, fundSpiders, sleep_time, isproxy, proxy, header,queuePool,fund_count,count_down
+    mySQL= PyMySQL.get_instance('localhost', 'root', 'JONC', 'fund',3306,'utf8',1)  # host/user/password/conn/port/charset/max conn
     isproxy = 0  # 如需要使用代理，改为1，并设置代理IP参数 proxy  
     proxy = {"http": "http://110.37.84.147:8080", "https": "http://110.37.84.147:8080"}  # 这里需要替换成可用的代理IP
     header = randHeader()
     sleep_time = 0.1
     fundSpiders = FundSpiders()
-
+    queuePool = queue.Queue()
     funds = fundSpiders.getFundCodesFromCsv()
     fund_count = len(funds)
     count = 0
+    count_down = 0
+
 
     while True:
         n = welcome()
-        if n == 1:
-            # 1.Update all FUND INFO & MANAGER INFO(& export)
-            # # truncate
-            # for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg','fund_managers_his']:
-            #      mySQL.truncateTable(tab)
+        if n == 1:  # 1.Update all FUND INFO & MANAGER INFO(& export)
             # scape & import
             for fund in funds:
                  count = count + 1
@@ -649,34 +729,54 @@ def main():
             # export
             for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg']:
                  exportTable(tab)
-        elif (n == 2 or n == 3):
-            # 2.Update all NAV INFO(& export)/3.Update last 60 days NAV INFO(& export)
+        elif (n == 2 or n == 3):  # 2.Update all NAV INFO(& export)/3.Update last 60 days NAV INFO(& export)
             # scape & import
             flag = (False if n == 2 else True)
-            for fund in funds:
-                count = count + 1
-                logger.info("\nProcessing [%d/%d] Funds" % (count, fund_count))
-                try:
-                    fundSpiders.getFundNav(fund, update_flag=flag)  # nav info, update_flag = False(全量)/True(增量)
-                except Exception as e:
-                    msg = str('GET NAV INFO FROM EASTMONEY [' + fund + '] \n' + " %s" % e)
-                    logger.exception(msg)
-            # # update
-            # for tab in ['fund_nav', 'fund_nav_currency']:
-            #     updateTable(tab)
+            multiProcessing = int(input('number of process: '))
+            if multiProcessing <=1:
+                for fund in funds:
+                    try:
+                        fundSpiders.getFundNav(fund, update=flag)  # nav info, update = False(全量)/True(增量)
+                    except Exception as e:
+                        logger.exception(str('GET NAV INFO FROM EASTMONEY [' + fund + '] \n' + " %s" % e))
+            else:# multiprocessing
+                start = time.time()
+                if multiProcessing <= 1:
+                    for fund in funds:
+                        count = count + 1
+                        logger.info("\nProcessing [%d/%d] Funds" % (count, fund_count))
+                        try:
+                            fundSpiders.getFundNav(fund, update=flag)  # nav info, update = False(全量)/True(增量)
+                        except Exception as e:
+                            msg = str('GET NAV INFO FROM EASTMONEY [' + fund + '] \n' + " %s" % e)
+                            logger.exception(msg)
+                    logger.info('Time used: %s' % str(time.time() - start))
+                else:  # multiprocessing
+                    obj = PyMySQL.get_instance('localhost', 'root', 'JONC', 'fund', 3306, 'utf8', multiProcessing)
+                    # build queue
+                    for fund in funds:
+                        queuePool.put([fund, flag])
+                    threads = []
+                    # 开启多个个线程
+                    for i in range(multiProcessing):
+                        thread = MyThread(singleThread)  # assign function, parameter
+                        threads.append(thread)
+                    for thread in threads:
+                        thread.start()  # 线程开始处理任务
+                    for thread in threads:
+                        thread.join()
+                    # 等待所有任务完成
+                    # queuePool.join()
+                    logger.info('Time used: %s' % str(time.time() - start))
+                    obj.close_conn()
+            # migrate
+            mySQL.migrateTable('fund_nav','fund_nav_slave')
+            mySQL.migrateTable('fund_nav_currency', 'fund_nav_currency_slave')
             # check
             checkNAV(funds)
             # export
             for tab in ['fund_nav', 'fund_nav_currency']:
                 exportTable(tab)
-        # elif n == 4:
-        #     # 4.Just Tidy up NAV INFO
-        #     # update
-        #     for tab in ['fund_nav', 'fund_nav_currency']:
-        #         updateTable(tab)
-        #     # export
-        #     for tab in ['fund_nav', 'fund_nav_currency']:
-        #         exportTable(tab)
         elif n == 4:
             # 4.Update all MANAGER HISTORY(& export)
             # scape & import
@@ -718,7 +818,7 @@ def main():
             fund = sys.stdin.readline().strip('\n')
             if len(fund) ==6:
                 try:
-                    fundSpiders.getFundNav(fund, update_flag= False)  # nav info, update_flag = False(全量)/True(增量)
+                    fundSpiders.getFundNav(fund, update= False)  # nav info, update = False(全量)/True(增量)
                 except Exception as e:
                     msg = str('GET NAV INFO FROM EASTMONEY [' + fund + '] \n' + " %s" % e)
                     logger.exception(msg)
@@ -727,7 +827,7 @@ def main():
                     exportTable(tab)
             else:
                 logger.exception('INVALID INPUT\n')
-        elif n == 9:# TODO
+        elif n == 9 :  # test zone
             print('TBC')
         else:
             logger.info('Bye~')
