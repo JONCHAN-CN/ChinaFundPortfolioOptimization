@@ -7,22 +7,22 @@
 # 使用库：requests、BeautifulSoup4、pymysql,pandas 
 # 作者：yuzhucu 
 '''
-from gevent import monkey
-monkey.patch_all()
+# from gevent import monkey
+# monkey.patch_all()
 import logging
+import queue
 import random
+import socket
 import sys
+import threading
 import time
 
 import pandas as pd
 import pymysql
 import requests
-from bs4 import BeautifulSoup
-import threading
-import queue
 import urllib3
-import socket
-
+from DBUtils.PooledDB import PooledDB
+from bs4 import BeautifulSoup
 
 logging.basicConfig(level=logging.INFO,
                     filename='../log/1-generateFundData.log',
@@ -134,54 +134,47 @@ def singleThread():
 
 
 class PyMySQL:
-    # 获取当前时间
-    def getCurrentTime(self):
-        return time.strftime('[%Y-%m-%d %H:%M:%S]', time.localtime(time.time()))
+    # global mySQL, HOST, USER, PASSWD, DB, PORT, CHAR
+    # # 获取当前时间
+    # def getCurrentTime(self):
+    #     return time.strftime('[%Y-%m-%d %H:%M:%S]', time.localtime(time.time()))
+    # HOST, USER, PASSWD, DB, PORT, CHAR = 'localhost','root', 'JONC', 'fund',3306,'utf8' # host/user/password//port/charset/max conn
+    __pool = None
 
-    __v = None
+    def __init__(self):
+        # 构造函数，创建数据库连接、游标
+        self.conn = PyMySQL.getmysqlconn()
+        self.conn.ping(True)  # 使用mysql ping来检查连接,实现超时自动重新连接
+        self.cur = self.conn.cursor(cursor=pymysql.cursors.DictCursor)
+        self.result_1 = queue.Queue()
+        self.result_2 = queue.Queue()
 
-    def __init__(self, host=None, user=None, passwd=None, db=None,port=None, charset=None, maxconn=5):
-        self.host, self.port, self.user, self.passwd, self.db, self.charset = host, port, user, passwd, db, charset
-        self.maxconn = maxconn
-        self.pool = queue.Queue(maxconn)
-        for i in range(maxconn):
-            try:
-                self.conn = pymysql.connect(host=self.host, port=self.port, user=self.user, passwd=self.passwd, db=self.db, charset=self.charset)
-                # self.conn.autocommit(True)
-                self.conn.ping(True)  # 使用mysql ping来检查连接,实现超时自动重新连接
-                self.cur = self.conn.cursor()  # self.cursor=self.conn.cursor(cursor=pymysql.cursors.DictCursor)
-                self.pool.put(self.conn)
-            except Exception as e:
-                raise IOError(e)
+    # 数据库连接池连接
+    @staticmethod
+    def getmysqlconn():
+        if PyMySQL.__pool is None:
+            __pool = PooledDB(creator=pymysql, mincached=1, maxcached=20, host='localhost',user='root', passwd='JONC', db='fund',port=3306, charset='utf8')
+            print(__pool)
+        return __pool.connection()
 
-    @classmethod
-    def get_instance(cls, *args, **kwargs):
-        if cls.__v:
-            return cls.__v
-        else:
-            cls.__v = PyMySQL(*args, **kwargs)
-            return cls.__v
 
     # 插入数据
     def insertData(self, table, my_dict):
+        cols = ', '.join(my_dict.keys())
+        values = '","'.join(my_dict.values())
+        sql = "replace into %s (%s) values (%s)" % (table, cols, '"' + values + '"')
         try:
-            cols = ', '.join(my_dict.keys())
-            values = '","'.join(my_dict.values())
-            sql = "replace into %s (%s) values (%s)" % (table, cols, '"' + values + '"')
-            try:
-                result = self.cur.execute(sql)
-                insert_id = self.conn.insert_id()
-                self.conn.commit()
-                if result:  # 判断是否执行成功
-                    return insert_id
-                else:
-                    return 1
-            except Exception as e:
-                self.conn.rollback()  # 发生错误时回滚
-                logger.exception(str("Data Insert Failed: %s" % e))
-                return 1
+            self.conn.ping(reconnect = True)
+            result = self.cur.execute(sql)
+            # insert_id = self.conn.insert_id()
+            self.conn.commit()
+            # if result:  # 判断是否执行成功
+            #     return insert_id
+            # else:
+            #     return 1
         except Exception as e:
-            logger.exception(str("MySQLdb Error: %s" % e))
+            self.conn.rollback()  # 发生错误时回滚
+            logger.exception(str("Data Insert Failed: %s" % e))
             return 1
 
     # 查询数据
@@ -311,9 +304,13 @@ class PyMySQL:
         except Exception as e:
             # 发生错误时回滚
             self.conn.rollback()
-            msg = str("Table Migrate Failed: %s" % e)
-            logger.exception(msg)
+            logger.exception(str("Table Migrate Failed: %s" % e))
             return 1
+
+    #释放资源
+    def dispose(self):
+        self.conn.close()
+        self.cur.close()
 
 
 class FundSpiders():
@@ -324,7 +321,7 @@ class FundSpiders():
     # 从csv文件中获取基金代码清单（可从wind或者其他财经网站导出）
     def getFundCodesFromCsv(self):
         # file_path=os.path.join(os.getcwd(),'fundCode.csv')
-        file_path = "../dep/1-fundCode_slave.csv"
+        file_path = "../dep/tmp.csv"
         # fund_code = pd.read_csv(file_path,encoding='gbk')
         fund_code = pd.read_csv(file_path, dtype=str)
         Code = fund_code.fund_code
@@ -557,7 +554,7 @@ class FundSpiders():
                         logger.exception(str("解析历史记录失败: [" + fund_code + "] " + fund_url + " %s" % e))
                     try:
                         if multi:
-                            obj.insertData('fund_nav_slave', result)
+                            mySQL.result_1.put(result)
                         else:
                             mySQL.insertData('fund_nav', result)
                         if silent:
@@ -586,7 +583,7 @@ class FundSpiders():
                         logger.exception(msg)
                     try:
                         if multi:
-                            obj.insertData('fund_nav_currency_slave', result)
+                            mySQL.result_2.put(result)
                         else:
                             mySQL.insertData('fund_nav_currency', result)
                         if silent:
@@ -695,8 +692,11 @@ def welcome():
 
 # MAIN
 def main():
-    global mySQL,obj, fundSpiders, sleep_time, isproxy, proxy, header,queuePool,fund_count,count_down
-    mySQL= PyMySQL.get_instance('localhost', 'root', 'JONC', 'fund',3306,'utf8',1)  # host/user/password/conn/port/charset/max conn
+    global mySQL# , HOST, USER,PASSWD, DB, PORT, CHAR
+
+    mySQL = PyMySQL()
+
+    global fundSpiders, sleep_time, isproxy, proxy, header, queuePool, fund_count, count_down
     isproxy = 0  # 如需要使用代理，改为1，并设置代理IP参数 proxy  
     proxy = {"http": "http://110.37.84.147:8080", "https": "http://110.37.84.147:8080"}  # 这里需要替换成可用的代理IP
     header = randHeader()
@@ -752,7 +752,6 @@ def main():
                             logger.exception(msg)
                     logger.info('Time used: %s' % str(time.time() - start))
                 else:  # multiprocessing
-                    obj = PyMySQL.get_instance('localhost', 'root', 'JONC', 'fund', 3306, 'utf8', multiProcessing)
                     # build queue
                     for fund in funds:
                         queuePool.put([fund, flag])
@@ -766,9 +765,12 @@ def main():
                     for thread in threads:
                         thread.join()
                     # 等待所有任务完成
-                    # queuePool.join()
+                    queuePool.join()
+                    while mySQL.result_1.qsize():  # 返回队列的大小
+                        mySQL.insertData('fund_nav_slave',mySQL.result_1.get())  # 将结果存入数据库中
+                    while mySQL.result_2.qsize():  # 返回队列的大小
+                        mySQL.insertData('fund_nav_currency_slave',mySQL.result_2.get())  # 将结果存入数据库中
                     logger.info('Time used: %s' % str(time.time() - start))
-                    obj.close_conn()
             # migrate
             mySQL.migrateTable('fund_nav','fund_nav_slave')
             mySQL.migrateTable('fund_nav_currency', 'fund_nav_currency_slave')
@@ -834,7 +836,8 @@ def main():
             break
 
     ### close DB connection
-    mySQL.cur.close()
+    # mySQL.cur.close()
+    mySQL.dispose()
 
 
 if __name__ == "__main__":
