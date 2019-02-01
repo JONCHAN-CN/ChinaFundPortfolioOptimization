@@ -15,10 +15,12 @@ import threading
 import time
 
 import pandas as pd
-import pymysql
+# import pymysql
 import requests
 import urllib3
 from bs4 import BeautifulSoup
+from tqdm import tqdm
+from utils import PyMySQL
 
 logging.basicConfig(level=logging.INFO,
                     filename='../log/1-generateFundData.log',
@@ -26,7 +28,7 @@ logging.basicConfig(level=logging.INFO,
                     datefmt='%Y/%m/%d %H:%M:%S',
                     format='%(levelname)s %(asctime)s %(funcName)s %(lineno)d %(message)s'
                     )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('main')
 logger.addHandler(logging.StreamHandler())  # 输出到控制台的handler
 
 
@@ -107,170 +109,184 @@ def getURL(url, tries_num=5, sleep_time=5, time_out=10, max_retry=10):
             return 1
 
 
-class PyMySQL:
-    # 数据库初始化
-    def _init_(self, host, user, passwd, db, port=3306, charset='utf8'):
-        pymysql.install_as_MySQLdb()
-        try:
-            self.conn = pymysql.connect(host=host, user=user, passwd=passwd, db=db, port=3306, charset='utf8')
-            self.conn.ping(reconnect=True)  # 使用mysql ping来检查连接,实现超时自动重新连接
-            self.conn.autocommit(True)
-            logger.info("MySQL DB Connect Success: " + user + '@' + host + ':' + str(port) + '/' + db)
-            self.cur = self.conn.cursor()
-        except  Exception as e:
-            msg = str("MySQL DB Connect Error: %s" % e)
-            logger.exception(msg)
-
-
-    # 插入数据
-    def insertData(self, table, my_dict):
-        cols = ', '.join(my_dict.keys())
-        values = '","'.join(my_dict.values())
-        sql = "replace into %s (%s) values (%s)" % (table, cols, '"' + values + '"')
-        try:
-            result = self.cur.execute(sql)
-            # insert_id = self.conn.insert_id()
-            # self.conn.commit()
-            # if result:  # 判断是否执行成功
-            #     return insert_id
-            # else:
-            #     return 1
-            return result
-        except Exception as e:
-            self.conn.rollback()  # 发生错误时回滚
-            logger.exception(str("Data Insert Failed: %s" % e))
-            return 1
-
-    # 查询数据
-    def queryData(self, table):
-        try:
-            sql = 'select DISTINCT * from %s' % table
-            self.cur.execute(sql)
-            data = self.cur.fetchall()
-            data_dict = []
-            for field in self.cur.description:
-                data_dict.append(field[0])
-            frame = pd.DataFrame(list(data), columns=data_dict)
-            logger.info(str("Successfully retrieved " + str(self.cur.execute(sql)) + " records from %s" % table))
-            return frame
-        except Exception as e:
-            logger.exception(str("Fail to retrieve data from %s" % table))
-            return 1
-
-    # 建表
-    def createTable(self, table,sourceTab,mode = 'like'):
-        if mode == 'like':
-            sql = "create table %s like %s" % (table,sourceTab)
-            logger.info('Executing %s' % sql)
-            try:
-                result = self.cur.execute(sql)
-                self.conn.commit()
-                # 判断是否执行成功
-                if result:
-                    msg = str("Table %s Create Succeed!" % table)
-                    logger.info(msg)
-            except Exception as e:
-                # 发生错误时回滚
-                self.conn.rollback()
-                msg = str("Table %s Create Failed: %s" % (table, e))
-                logger.exception(msg)
-        else:
-            logger.exception('More create table mode TBC~')
-
-    # 删除重复表数据| DISCARD
-    def distinctTable(self, table):
-        # for nav only
-        newTableName = table + '_unique'
-        sqlAssureNew = "drop table if exists %s" % newTableName
-        sql = "create table %s as select distinct * from %s" % (newTableName, table)
-        try:
-            AN = self.cur.execute(sqlAssureNew)
-            if AN:
-                result = self.cur.execute(sql)
-                self.conn.commit()
-                # 判断是否执行成功
-                if result:
-                    msg = str("Table %s Update Succeed!" % table)
-                    logger.info(msg)
-        except Exception as e:
-            # 发生错误时回滚
-            self.conn.rollback()
-            msg = str("Table %s Update Failed: %s" % (table, e))
-            logger.exception(msg)
-
-    # 清空表数据| DISCARD
-    def truncateTable(self, table):
-        sql = "truncate table %s" % table
-        logger.info('Executing %s' % sql)
-        try:
-            result = self.cur.execute(sql)
-            self.conn.commit()
-            # 判断是否执行成功
-            if result:
-                msg = str("Table %s Truncate Succeed!" % table)
-                logger.info(msg)
-        except Exception as e:
-            # 发生错误时回滚
-            self.conn.rollback()
-            msg = str("Table %s Truncate Failed: %s" % (table, e))
-            logger.exception(msg)
-
-    # 删表
-    def dropTable(self, table):
-        cfm = bool(input('Plz confirm to DROP table %s :'%table))
-        if cfm :
-            sql = "drop table if exists %s" % table
-            logger.info('Executing %s' % sql)
-            try:
-                result = self.cur.execute(sql)
-                self.conn.commit()
-                # 判断是否执行成功
-                if result:
-                    msg = str("Table %s Drop Succeed!" % table)
-                    logger.info(msg)
-            except Exception as e:
-                # 发生错误时回滚
-                self.conn.rollback()
-                msg = str("Table %s Drop Failed: %s" % (table, e))
-                logger.exception(msg)
-        else:
-            logger.exception('STOP by user.')
-
-    # 查询库中NAV数据量
-    def queryNAVQuantity(self, table):
-        try:
-            sql = "select distinct fund_code, count(*) from (select distinct * from %s) t group by fund_code" % table
-            self.cur.execute(sql)
-            data = self.cur.fetchall()
-            frame = pd.DataFrame(list(data),columns = ['fund_code', 'quantityFromDB'])
-            logger.info(str("Successfully query NAV Quantity " + str(self.cur.execute(sql)) + " records from %s" % table))
-            return frame
-        except Exception as e:
-            logger.exception(str("Fail to query NAV Quantity from %s" % table))
-            return 1
-
-    # 迁移库表
-    def migrateTable(self, dest,source):
-        try:
-            sql = "replace into %s select * from %s" % (dest,source)
-            result = self.cur.execute(sql)
-            insert_id = self.conn.insert_id()
-            self.conn.commit()
-            # 判断是否执行成功
-            if result:
-                return insert_id
-            else:
-                return 1
-        except Exception as e:
-            # 发生错误时回滚
-            self.conn.rollback()
-            logger.exception(str("Table Migrate Failed: %s" % e))
-            return 1
-
-    #释放资源
-    def dispose(self):
-        self.conn.close()
-        self.cur.close()
+# class PyMySQL:
+#     # 数据库初始化
+#     def _init_(self, host, user, passwd, db, port=3306, charset='utf8'):
+#         pymysql.install_as_MySQLdb()
+#         try:
+#             self.conn = pymysql.connect(host=host, user=user, passwd=passwd, db=db, port=3306, charset='utf8')
+#             self.conn.ping(reconnect=True)  # 使用mysql ping来检查连接,实现超时自动重新连接
+#             self.conn.autocommit(True)
+#             self.cur = self.conn.cursor()
+#             logger.info("MySQL DB Connect Success: " + user + '@' + host + ':' + str(port) + '/' + db)
+#         except  Exception as e:
+#             logger.exception(str("MySQL DB Connect Error: %s" % e))
+#
+#     # 插入数据
+#     def insertData(self, table, my_dict,batch = False):
+#         try:
+#             cols = ', '.join(my_dict.keys())
+#             values = '","'.join(my_dict.values())
+#             sql = "replace into %s (%s) values (%s)" % (table, cols, '"' + values + '"')
+#             result = self.cur.execute(sql) # return rows effected
+#             # insert_id = self.conn.insert_id() # 0 if OK
+#             if  not result:  # 判断是否执行成功
+#                 return 1
+#         except Exception as e:
+#             self.conn.rollback()  # 发生错误时回滚
+#             logger.exception(str("Data Insert Failed: %s" % e))
+#             return 1
+#
+#     # 批量插入数据
+#     def executeManyData(self, table, my_dict):
+#         try:
+#             # TODO batch insert
+#             cols = ', '.join(my_dict[0].keys())
+#             len_dict = len(my_dict[0])
+#             for i in range(len(my_dict)):
+#                 my_dict[i] = tuple(my_dict[i])
+#             sql = "replace into %s (%s) values (" % (table, cols) + '%s,' * (len_dict - 1) + '%s)'
+#             result = self.cur.executemany(sql, my_dict)  # return rows effected
+#             insert_id = self.conn.insert_id()  # 0 if OK
+#             if result:  # 判断是否执行成功
+#                 return insert_id
+#             else:
+#                 return 1
+#         except Exception as e:
+#             self.conn.rollback()  # 发生错误时回滚
+#             logger.exception(str("Data Insert Failed: %s" % e))
+#             return 1
+#
+#     # 查询数据
+#     def queryData(self, table):
+#         try:
+#             sql = 'select DISTINCT * from %s' % table
+#             self.cur.execute(sql)
+#             data = self.cur.fetchall()
+#             data_dict = []
+#             for field in self.cur.description:
+#                 data_dict.append(field[0])
+#             frame = pd.DataFrame(list(data), columns=data_dict)
+#             logger.info(str("Successfully retrieved " + str(self.cur.execute(sql)) + " records from %s" % table))
+#             return frame
+#         except Exception as e:
+#             logger.exception(str("Fail to retrieve data from %s" % table))
+#             return 1
+#
+#     # 建表
+#     def createTable(self, table,sourceTab,mode = 'like'):
+#         if mode == 'like':
+#             sql = "create table %s like %s" % (table,sourceTab)
+#             logger.info('Executing %s' % sql)
+#             try:
+#                 result = self.cur.execute(sql)
+#                 self.conn.commit()
+#                 # 判断是否执行成功
+#                 if result:
+#                     msg = str("Table %s Create Succeed!" % table)
+#                     logger.info(msg)
+#             except Exception as e:
+#                 # 发生错误时回滚
+#                 self.conn.rollback()
+#                 msg = str("Table %s Create Failed: %s" % (table, e))
+#                 logger.exception(msg)
+#         else:
+#             logger.exception('More create table mode TBC~')
+#
+#     # 删除重复表数据| DISCARD
+#     def distinctTable(self, table):
+#         # for nav only
+#         newTableName = table + '_unique'
+#         sqlAssureNew = "drop table if exists %s" % newTableName
+#         sql = "create table %s as select distinct * from %s" % (newTableName, table)
+#         try:
+#             AN = self.cur.execute(sqlAssureNew)
+#             if AN:
+#                 result = self.cur.execute(sql)
+#                 self.conn.commit()
+#                 # 判断是否执行成功
+#                 if result:
+#                     msg = str("Table %s Update Succeed!" % table)
+#                     logger.info(msg)
+#         except Exception as e:
+#             # 发生错误时回滚
+#             self.conn.rollback()
+#             msg = str("Table %s Update Failed: %s" % (table, e))
+#             logger.exception(msg)
+#
+#     # 清空表数据| DISCARD
+#     def truncateTable(self, table):
+#         sql = "truncate table %s" % table
+#         logger.info('Executing %s' % sql)
+#         try:
+#             result = self.cur.execute(sql)
+#             self.conn.commit()
+#             # 判断是否执行成功
+#             if result:
+#                 msg = str("Table %s Truncate Succeed!" % table)
+#                 logger.info(msg)
+#         except Exception as e:
+#             # 发生错误时回滚
+#             self.conn.rollback()
+#             msg = str("Table %s Truncate Failed: %s" % (table, e))
+#             logger.exception(msg)
+#
+#     # 删表
+#     def dropTable(self, table):
+#         cfm = bool(input('Plz confirm to DROP table %s :'%table))
+#         if cfm :
+#             sql = "drop table if exists %s" % table
+#             logger.info('Executing %s' % sql)
+#             try:
+#                 result = self.cur.execute(sql)
+#                 self.conn.commit()
+#                 # 判断是否执行成功
+#                 if result:
+#                     msg = str("Table %s Drop Succeed!" % table)
+#                     logger.info(msg)
+#             except Exception as e:
+#                 # 发生错误时回滚
+#                 self.conn.rollback()
+#                 msg = str("Table %s Drop Failed: %s" % (table, e))
+#                 logger.exception(msg)
+#         else:
+#             logger.exception('STOP by user.')
+#
+#     # 查询库中NAV数据量
+#     def queryNAVQuantity(self, table):
+#         try:
+#             sql = "select distinct fund_code, count(*) from (select distinct * from %s) t group by fund_code" % table
+#             self.cur.execute(sql)
+#             data = self.cur.fetchall()
+#             frame = pd.DataFrame(list(data),columns = ['fund_code', 'quantityFromDB'])
+#             logger.info(str("Successfully query NAV Quantity " + str(self.cur.execute(sql)) + " records from %s" % table))
+#             return frame
+#         except Exception as e:
+#             logger.exception(str("Fail to query NAV Quantity from %s" % table))
+#             return 1
+#
+#     # 迁移库表
+#     def migrateTable(self, dest,source):
+#         try:
+#             sql = "replace into %s select * from %s" % (dest,source)
+#             result = self.cur.execute(sql)
+#             insert_id = self.conn.insert_id()
+#             self.conn.commit()
+#             # 判断是否执行成功
+#             if result:
+#                 return insert_id
+#             else:
+#                 return 1
+#         except Exception as e:
+#             # 发生错误时回滚
+#             self.conn.rollback()
+#             logger.exception(str("Table Migrate Failed: %s" % e))
+#             return 1
+#
+#     #释放资源
+#     def dispose(self):
+#         self.conn.close()
+#         self.cur.close()
 
 
 class FundSpiders():
@@ -278,8 +294,8 @@ class FundSpiders():
         return time.strftime('[%Y-%m-%d %H:%M:%S]', time.localtime(time.time()))
 
     def getFundCodesFromCsv(self):   # 从csv文件中获取基金代码清单（可从wind或者其他财经网站导出）
-        # file_path = "../dep/1-fundCode_master.csv"
         file_path = "../dep/TMP.csv"
+        # file_path = "../dep/1-fundCode_master.csv"
         fund_code = pd.read_csv(file_path, dtype=str)
         Code = fund_code.fund_code
         return Code
@@ -396,7 +412,7 @@ class FundSpiders():
                             logger.exception(msg)
         return result
 
-    # 获取基金经理履历数据 -
+    # 获取基金经理履历数据 - 基金经理履历数据
     def getFundManagersHistory(self):
         manaList = pd.DataFrame(mySQL.queryData('fund_managers_info'))
         manaList = manaList[['manager_id','url','manager_name']].drop_duplicates()
@@ -449,7 +465,7 @@ class FundSpiders():
         count = count + 1
         logger.info("Processing [%d/%d] Funds - NAV ["% (count, fund_count) + fund_code + "]" )
 
-        fund_url = 'http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=' + fund_code + '&page=1&per=45' # http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=000001&page=1&per=45
+        fund_url = 'http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=' + fund_code + '&page=1&per=49' # http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=000001&page=1&per=49
         pages = 0
         records = 0
 
@@ -465,6 +481,7 @@ class FundSpiders():
             pages = (res.text.strip('var apidata=').strip('{;}').split(',')[2].strip('pages:'))
         except  Exception as e:
             logger.exception(str("爬取记录总数失败: [" + fund_code + "] " + fund_url + " %s" % e))
+
         # 如增量更新，取60个交易日数据
         if not update:
             pages = int(pages)
@@ -477,116 +494,105 @@ class FundSpiders():
             fund_nav = 'http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=' + fund_code + '&page=' + str(pg) + '&per=49'
             res = getURL(fund_nav)
             soup = BeautifulSoup(res.text, 'html.parser')
-            result = {}
-            result['fund_code'] = fund_code
+
             tables = soup.findAll('table')
             tab = tables[0]
+            tab_name =''
             # 解析表格，逐行逐单元格获取净值数据
             for tr in tab.findAll('tr'):
-                # 跳过表头；获取净值、累计净值和日收益率数据 如果列数为7，可以判断为一般基金。当然也可以通过标题或者基金类型参数来判断，待后续优化 todo
+                result = {} # WTF 20190120
+                result['fund_code'] = fund_code
+                # 跳过表头；获取净值、累计净值和日收益率数据 如果列数为7，可以判断为一般基金。当然也可以通过标题或者基金类型参数来判断，待后续优化
                 if tr.findAll('td') and len((tr.findAll('td'))) == 7:
                     i = i + 1
                     try:
-                        result['the_date'] = (
-                            tr.select('td:nth-of-type(1)')[0].getText().strip().split(u'起始时间')[0].replace('*','').strip())
+                        result['the_date'] = (tr.select('td:nth-of-type(1)')[0].getText().strip().split(u'起始时间')[0].replace('*','').strip())
                         result['nav'] = (tr.select('td:nth-of-type(2)')[0].getText().strip())
                         result['add_nav'] = (tr.select('td:nth-of-type(3)')[0].getText().strip())
                         result['nav_chg_rate'] = (tr.select('td:nth-of-type(4)')[0].getText().strip())
                         result['buy_state'] = (tr.select('td:nth-of-type(5)')[0].getText().strip())
                         result['sell_state'] = tr.select('td:nth-of-type(6)')[0].getText().strip()
                         result['div_record'] = tr.select('td:nth-of-type(7)')[0].getText().strip().strip('\'')
-                    except  Exception as e:
-                        logger.exception(str("解析历史记录失败: [" + fund_code + "] " + fund_url + " %s" % e))
-                    try:
                         if multi:
-                            dbQueue.put(['fund_nav_slave', result],timeout= 0.5)
+                            lock.acquire()
+                            outQueue.put(['fund_nav_slave', result])
+                            lock.release()
                         else:
-                            mySQL.insertData('fund_nav', result)
+                            mySQL.insertData('fund_nav_slave', result)
                         if silent:
                             pass
                         else:
-                            msg = str("[" + result['fund_code'] + "] " + str(i) + '/' + str(records) + " " + result[
-                                'the_date'] + " " + result['nav'] + " " + result['add_nav'] + " " + result[
-                                          'nav_chg_rate'] + " " + result['buy_state'] + " " + result['sell_state'] + " " +
-                                      result['div_record'])
-                            logger.info(msg)
-                    except  Exception as e:
-                        logger.exception(str("入库失败: [" + fund_code + "] " + fund_url + " %s" % e))
+                            logger.info(str("[" + result['fund_code'] + "] " + str(i) + '/' + str(records) + " " + result['the_date'] + " " + result['nav']))
+                    except Exception as e:
+                        logger.exception(str("[" + fund_code + "] 获取失败-%d"%i + fund_url + " %s" % e))
                 # 如果是货币基金，获取万份收益和7日年化利率
                 elif tr.findAll('td') and len((tr.findAll('td'))) == 6:
                     i = i + 1
                     try:
-                        result['the_date'] = (
-                            tr.select('td:nth-of-type(1)')[0].getText().strip().split(u'起始时间')[0].replace('*','').strip())
+                        result['the_date'] = (tr.select('td:nth-of-type(1)')[0].getText().strip().split(u'起始时间')[0].replace('*','').strip())
                         result['profit_per_units'] = (tr.select('td:nth-of-type(2)')[0].getText().strip())
                         result['profit_rate'] = (tr.select('td:nth-of-type(3)')[0].getText().strip())
                         result['buy_state'] = (tr.select('td:nth-of-type(4)')[0].getText().strip())
                         result['sell_state'] = (tr.select('td:nth-of-type(5)')[0].getText().strip())
                         result['div_record'] = (tr.select('td:nth-of-type(6)')[0].getText().strip())
-                    except  Exception as e:
-                        msg = str("解析历史记录失败: [" + fund_code + "] " + fund_url + " %s" % e)
-                        logger.exception(msg)
-                    try:
                         if multi:
-                            dbQueue.put(['fund_nav_currency_slave', result],timeout= 0.5)
+                            lock.acquire()
+                            outQueue.put(['fund_nav_currency_slave', result])
+                            lock.release()
                         else:
-                            mySQL.insertData('fund_nav_currency', result)
+                            mySQL.insertData('fund_nav_currency_slave', result)
                         if silent:
                             pass
                         else:
-                            logger.info(str("[" + result['fund_code'] + "] " + str(i) + '/' + str(records) + " " + result[
-                                'the_date'] + " " + result['profit_per_units'] + " " + result['profit_rate'] + " " + result[
-                                          'buy_state'] + " " + result['sell_state']))
+                            logger.info(str("[" + result['fund_code'] + "] " + str(i) + '/' + str(records) + " " + result['the_date'] + " " + result['profit_rate']))
                     except  Exception as e:
-                        logger.exception(str("入库失败: [" + fund_code + "] " + fund_url + " %s" % e))
+                        logger.exception(str("[" + fund_code + "] 获取失败-%d" % i + fund_url + " %s" % e))
                 else:
                     pass
         logger.info(str("[" + fund_code + "] " + '共' + str(i) + '/' + str(records) + '行'))
 
-    # 获取历史净值的总记录数(net)
+    # 获取历史净值的总记录数(net) - multiply thread mode only
     def getNavQuan(self, fund_code):
         global count
         count = count + 1
         logger.info("Processing [%d/%d] Funds - NAV quantity ["% (count, fund_count) + fund_code + "]" )
 
         fund_url = 'http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=' + fund_code + '&page=1&per=1' # http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=000001&page=1&per=1
+        result ={}
+        result['fund_code'] = fund_code
+        result['updated_date'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
+
         try:
-            # logger.info("Processing NAV quantity [" + fund_code + "]")
             res = getURL(fund_url)
-            records = (res.text.strip('var apidata=').strip('{;}').split(',')[1].strip('records:'))
-            dbQueue.put([fund_code,records])
+            result['quantity'] = (res.text.strip('var apidata=').strip('{;}').split(',')[1].strip('records:'))
         except  Exception:
             logger.exception(str("爬取记录总数失败: [" + fund_code + "] " + fund_url))
-            dbQueue.put([fund_code, -1])
-
+            result['quantity'] = -1
+        outQueue.put(result)
 
 # 检查净值数据数量
-def checkNAV():
+def checkNAV(internet= True):
     try:
-        start = time.time()
-        fundsCheck = pd.DataFrame()
-        while not dbQueue.empty():
-            result={}
-            tmp = dbQueue.get()
-            # fundsCheck = pd.concat([fundsCheck,pd.Series(tmp).to_frame().T],axis=0)
-            if (tmp[1] !=-1) and (len(tmp[1])<15):
-                result['fund_code'] = tmp[0]
-                result['quantity'] = tmp[1]
-                result['updated_date'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
-                mySQL.insertData('fund_nav_quantity', result)
-        fundsCheck = mySQL.queryData('fund_nav_quantity')
-        end = time.time()
-        logger.info("Time used to archive NAV quantity: " + str(end - start))
+        if internet:
+            start = time.time()
+            pbar = tqdm(total=outQueue.qsize(),dynamic_ncols=True)
+            while not outQueue.empty():  # 启动outQueue时队列已经稳定
+                result = outQueue.get()
+                pbar.update(1)
+                if (result['quantity'] !=-1) and (len(result['quantity'])<15):
+                    mySQL.insertData('fund_nav_quantity', result)
+            pbar.close()
+            end = time.time()
+            logger.info("Time used to archive NAV quantity from Internet: " + str(end - start))
 
+        end = time.time()
+        fundsCheck = mySQL.queryData('fund_nav_quantity')
         df_nav = mySQL.queryNAVQuantity('fund_nav')  # from DB
         df_cur = mySQL.queryNAVQuantity('fund_nav_currency')  # from DB
-        start = time.time()
-        logger.info("Time used to query NAV quantity from DB: " + str(start - end))
-
         df_nav = pd.concat([df_nav, df_cur], axis=0)
         fundsCheck = pd.merge(fundsCheck, df_nav, how='left', on=['fund_code'])
-        end = time.time()
-        logger.info("Time used to merge NAV quantity: " + str(end - start))
+        start = time.time()
+        logger.info("Time used to query NAV quantity from DB: " + str(start - end))
 
         fundsCheck['pct'] = fundsCheck.apply(
             lambda x: pd.to_numeric(x['quantityFromDB'], errors='coerce') / pd.to_numeric(x['quantity'],errors='coerce'), axis=1)
@@ -608,51 +614,60 @@ def exportTable(tab):
         logger.exception(msg)
 
 
-class MyThread(threading.Thread):
+class baseThread(threading.Thread):
     def __init__(self, func):
-        super(MyThread, self).__init__()  # 调用父类的构造函数
+        super(baseThread, self).__init__()  # 调用父类的构造函数
         self.func = func  # 传入线程函数逻辑
+        self.daemon = True
+
     def run(self):
         self.func()
 
-def processThread():
-    while True :
-        if not processQueue.empty():
-            item = processQueue.get()  #获得任务
+def processThread():  # combine thread(worker) /queue(task) / function(procedure)
+    while not inQueue.empty():  # 启动outQueue时队列已经稳定
+        item = inQueue.get()  #获得任务
+        try:
+            if item[1] =='NAV':
+                fundSpiders.getFundNav(item[0], item[2],True,True)  # fund_code, update = False(全量)/True(增量),silent_flag, multi_flag
+            elif item[1] =='QUANTITY':
+                fundSpiders.getNavQuan(item[0])
+            else:
+                logger.exception('Processing function NOT specifified !')
+                pass
+            inQueue.task_done()
+            logger.info(' ' *70+'[' + item[0] + '] Done!')
+            time.sleep(2)
+        except Exception as e:
+            logger.exception(str('processThread FAIL [' + item[0] + ']\n' + " %s" % e))
+            inQueue.task_done()  # TODO retry logic
+
+def IOThread():
+    while (not outQueue.empty()) or (not process_finish):  # 启动时outQueue 还在put
+        if not process_finish:
+            item = outQueue.get()
             try:
-                if item[1] =='NAV':
-                    fundSpiders.getFundNav(item[0], item[2],True,True)  # nav info, update = False(全量)/True(增量),silent_flag, multiflag
-                elif item[1] =='QUANTITY':
-                    fundSpiders.getNavQuan(item[0])
-                else:
-                    logger.exception('Processing function NOT specifified !')
-                    pass
-                processQueue.task_done()
-                logger.info(' ' *70+'[' + item[0] + '] Done!')
-                time.sleep(2)
-            except Exception as e:
-                logger.exception(str('processThread FAIL [' + item[0] + ']\n' + " %s" % e))
+                mySQL.insertData(item[0], item[1])  # 将结果存入数据库中
+            finally:
+                outQueue.task_done()
         else:
+            logger.info('%d Total Left to I/O...' % int(outQueue.qsize()))
+            pbar = tqdm(total = outQueue.qsize(),ncols= 500)
+            while outQueue.qsize():  # 返回队列的大小
+                item = outQueue.get()
+                try:
+                    mySQL.insertData(item[0], item[1])  # 将结果存入数据库中
+                finally:
+                    pbar.update(1)
+                    outQueue.task_done()
+            pbar.close()
             break
-
-def dbThread():
-    global process_finish
-    while (not dbQueue.empty()) or (not process_finish):
-        while dbQueue.qsize():  # 返回队列的大小
-            item = dbQueue.get()
-            mySQL.insertData(item[0], item[1])  # 将结果存入数据库中
-    logger.info('dbThread END HERE')
-
-    # while dbQueue_s.qsize() or (not process_finish):  # 返回队列的大小
-    #     mySQL.insertData('fund_nav_currency_slave', dbQueue_s.get())  # 将结果存入数据库中
-
 
 # 功能选择对话
 def welcome():
     logger.info('\nPlz input no. to execute commands:\n'
                 '1.Update all FUND INFO & MANAGER INFO(& export)\n'
                 '2.Update all NAV INFO(& export)\n'
-                '3.Update last 60 days NAV INFO(& export)\n'
+                '3.Update last 49 days NAV INFO(& export)\n'
                 '4.Update all MANAGER HISTORY(& export)\n'
                 '5.Just Check NAV INFO\n'
                 '6.Export all TABLES\n'
@@ -672,19 +687,19 @@ def welcome():
 
 # MAIN
 def main():
-    global mySQL,fundSpiders, sleep_time, isproxy, proxy, header, processQueue,dbQueue, dbQueue_s,process_finish, fund_count, count
-    mySQL = PyMySQL()
+    global mySQL,fundSpiders, sleep_time, isproxy, proxy, header, inQueue,outQueue, lock,process_finish, fund_count, count
+    mySQL = PyMySQL.PyMySQL()
     mySQL._init_('localhost', 'root', 'JONC', 'fund')  # host/user/password/database
 
-    isproxy = 0  # 如需要使用代理，改为1，并设置代理IP参数 proxy  
+    isproxy = 0  # 如需要使用代理，改为1，并设置代理IP参数 proxy
     proxy = {"http": "http://110.37.84.147:8080", "https": "http://110.37.84.147:8080"}  # 这里需要替换成可用的代理IP
     header = randHeader()
     sleep_time = 0.2
     fundSpiders = FundSpiders()
 
-    processQueue = queue.Queue()
-    dbQueue_s = queue.Queue()
-    dbQueue = queue.Queue()
+    inQueue = queue.Queue()
+    outQueue = queue.Queue()
+    lock = threading.Lock()
     process_finish = False
 
     funds = fundSpiders.getFundCodesFromCsv()
@@ -694,122 +709,85 @@ def main():
         n = welcome()
         count = 0
         multiProcessing = int(input('number of process: '))
-        # multiProcessing = 20
+        # multiProcessing = 100
 
         if n == 1:  # 1.Update all FUND INFO & MANAGER INFO(& export)
             # scape & import
-            for fund in funds:
-                 try:
-                     fundSpiders.getFundInfo(fund)  # fund info 全量
-                     fundSpiders.getFundManagers(fund)  # manager info, 全量
-                 except Exception as e:
-                     logger.exception(str('GET FUND/MANAGER INFO [' + fund + '] \n' + " %s" % e))
+            [fundSpiders.getFundInfo(fund) for fund in funds]  # fund info 全量
+            [fundSpiders.getFundManagers(fund) for fund in funds]  # manager info, 全量
             # export
-            for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg']:
-                 exportTable(tab)
+            [exportTable(tab) for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg']]
         elif (n == 2 or n == 3):  # 2.Update all NAV INFO(& export)/3.Update last 60 days NAV INFO(& export)
             flag = (False if n == 2 else True)
             if multiProcessing <=1:
-                for fund in funds:
-                    # scape & import
-                    fundSpiders.getFundNav(fund, update=flag)  # nav info, update = False(全量)/True(增量)
-            else:# multiple thread
+                # scape & import
+                [fundSpiders.getFundNav(fund, update=flag) for fund in funds]  # nav info, update = False(全量)/True(增量)
+            else:  # multiple thread
                 start = time.time()
-                for fund in funds:
-                    processQueue.put([fund,'NAV',flag]) # build process queue ->fund_code/ func/ arg
-                threads = []
-                for i in range(multiProcessing):
-                    thread = MyThread(processThread)   # create process thread
-                    threads.append(thread)
-                #thread = MyThread(dbThread)  # create db thread
-                # threads.append(thread)
-                for thread in threads:
-                    thread.start()  # 线程开始处理任务
-                for thread in threads[:-1]:
-                    thread.join()  # processThread
-                # processQueue.join() # 等待所有任务完成 永远等？
-                thread = MyThread(dbThread)
-                thread.start()
+                [inQueue.put([fund, 'NAV', flag]) for fund in funds]  # create process queue ->fund_code/ func/ arg
+                threads = [baseThread(processThread) for _ in range(multiProcessing)]  # create process thread
+                threads.append(baseThread(IOThread)) # create IO thread
+
+                [thread.start() for thread in threads]  # start thread
+
+                [thread.join() for thread in threads[:-1]]  # wait until all process finishes tasks
+                inQueue.join() # wait until all tasks to be done
                 process_finish = True
-                thread.join()  # dbThread
-                logger.info('Time used: %s' % str(time.time() - start))
+
+                outQueue.join() # wait until all data to be transferred
+                threads[-1].join()
+                logger.info('Time used multithreading scraping NAV: %s' % str(time.time() - start))
             # migrate
-            # mySQL.migrateTable('fund_nav','fund_nav_slave')
-            # mySQL.migrateTable('fund_nav_currency', 'fund_nav_currency_slave')
-            # # export
-            # for tab in ['fund_nav', 'fund_nav_currency']:
-            #     exportTable(tab)
-        elif n == 4:
-            # 4.Update all MANAGER HISTORY(& export)
+            mySQL.migrateTable('fund_nav','fund_nav_slave')
+            mySQL.migrateTable('fund_nav_currency', 'fund_nav_currency_slave')
+            # export
+            [exportTable(tab) for tab in ['fund_nav', 'fund_nav_currency']]
+        elif n == 4:  # 4.Update all MANAGER HISTORY(& export)
             # scape & import
             fundSpiders.getFundManagersHistory()  # manager history, 全量
             # export
             exportTable('fund_managers_his')
         elif n == 5: # 5.Just Check NAV INFO
             # from internet
-            if multiProcessing <=1:
-                for fund in funds:
-                    fundSpiders.getNavQuan(fund)
-            else:# multiprocessing
-                start = time.time()
-                for fund in funds:
-                    processQueue.put([fund,'QUANTITY',None]) # build process queue ->fund_code/ func/ arg
-                threads = []
-                for i in range(multiProcessing):
-                    thread = MyThread(processThread)  # create process thread
-                    threads.append(thread)
-                for thread in threads:
-                    thread.start()  # 线程开始处理任务
-                for thread in threads:
-                    thread.join()
-                # processQueue.join()
-                logger.info('Time used: %s' % str(time.time() - start))
+            start = time.time()
+            [inQueue.put([fund, 'QUANTITY', None]) for fund in funds]  # build process queue ->fund_code/ func/ arg
+            threads = [baseThread(processThread) for _ in range(multiProcessing)]  # create process thread
+            [thread.start() for thread in threads]  # start thread
+            [thread.join() for thread in threads]  # wait until all process finishes tasks
+            inQueue.join()
+            logger.info('Time used to multithreading scraping NAV quantity: %s ' % str(time.time() - start))
             # to database
             checkNAV()
-        elif n == 6:
-            # 6.Export all TABLES
+        elif n == 6:  # 6.Export all TABLES
             # export
             for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg', 'fund_nav', 'fund_nav_currency','fund_managers_his']:
                 exportTable(tab)
-        elif n == 7:
-            # 7.Update ONE FUND INFO & MANAGER INFO(& export)
+        elif n == 7:  # 7.Update ONE FUND INFO & MANAGER INFO(& export)
             logger.info('\nPlz input FUND_CODE:\n')
             fund = sys.stdin.readline().strip('\n')
             if len(fund) ==6:
-                try:
-                    fundSpiders.getFundInfo(fund)  # fund info
-                except Exception as e:
-                    msg = str('GET FUND INFO FROM EASTMONEY [' + fund + '] \n' + " %s" % e)
-                    logger.exception(msg)
-                try:
-                    fundSpiders.getFundManagers(fund)  # manager info
-                except Exception as e:
-                    msg = str('GET MANAGER INFO FROM EASTMONEY [' + fund + '] \n' + " %s" % e)
-                    logger.exception(msg)
+                fundSpiders.getFundInfo(fund)  # fund info
+                fundSpiders.getFundManagers(fund)  # manager info
                 # export
-                for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg']:
-                    exportTable(tab)
+                [exportTable(tab) for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg']]
             else:
                 logger.exception('INVALID INPUT\n')
-        elif n == 8:
-            # 8.Update ONE NAV INFO(& export)
+        elif n == 8:  # 8.Update ONE NAV INFO(& export)
             logger.info('\nPlz input FUND_CODE:\n')
             fund = sys.stdin.readline().strip('\n')
             if len(fund) ==6:
                 fundSpiders.getFundNav(fund, update= False)  # nav info, update = False(全量)/True(增量)
-            # export
-            for tab in ['fund_nav', 'fund_nav_currency']:
-                exportTable(tab)
+                # export
+                [exportTable(tab) for tab in ['fund_nav', 'fund_nav_currency']]
             else:
                 logger.exception('INVALID INPUT\n')
-        elif n == 9 :  # test zone
+        elif n == 9:
             print('TBC')
         else:
             logger.info('Bye~')
             break
 
     ### close DB connection
-    # mySQL.cur.close()
     mySQL.dispose()
 
 
