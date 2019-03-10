@@ -3,6 +3,7 @@
 原PO: https://blog.csdn.net/yuzhucu/article/details/55261024
 原作：yuzhucu
 功能：抓取东方财富网上基金相关数据
+@author: JON7390
 '''
 
 import logging
@@ -18,7 +19,8 @@ import requests
 import urllib3
 from bs4 import BeautifulSoup
 from tqdm import tqdm
-from utils import PyMySQL
+
+from src.utils import PyMySQL
 
 logging.basicConfig(level=logging.INFO,
                     filename='../log/1-generateFundData.log',
@@ -330,10 +332,10 @@ class FundSpiders():
                         result['div_record'] = tr.select('td:nth-of-type(7)')[0].getText().strip().strip('\'')
                         if multi:
                             lock.acquire()
-                            outQueue.put(['fund_nav_slave', result])
+                            outQueue.put(['fund_nav', result])
                             lock.release()
                         else:
-                            mySQL.insertData('fund_nav_slave', result)
+                            mySQL.insertData('fund_nav', result)
                         if silent:
                             pass
                         else:
@@ -352,10 +354,10 @@ class FundSpiders():
                         result['div_record'] = (tr.select('td:nth-of-type(6)')[0].getText().strip())
                         if multi:
                             lock.acquire()
-                            outQueue.put(['fund_nav_currency_slave', result])
+                            outQueue.put(['fund_nav_currency', result])
                             lock.release()
                         else:
-                            mySQL.insertData('fund_nav_currency_slave', result)
+                            mySQL.insertData('fund_nav_currency', result)
                         if silent:
                             pass
                         else:
@@ -366,11 +368,13 @@ class FundSpiders():
                     pass
         logger.info(str("[" + fund_code + "] " + '共' + str(i) + '/' + str(records) + '行'))
 
+
     # 获取历史净值的总记录数(net) - multiply thread mode only
     def getNavQuan(self, fund_code):
-        global count
+        global count,fund_count
         count = count + 1
         logger.info("Processing [%d/%d] Funds - NAV quantity ["% (count, fund_count) + fund_code + "]" )
+        count = 0 if (fund_count == count) else count
 
         fund_url = 'http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=' + fund_code + '&page=1&per=1' # http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=000001&page=1&per=1
         result ={}
@@ -383,38 +387,40 @@ class FundSpiders():
         except  Exception:
             logger.exception(str("爬取记录总数失败: [" + fund_code + "] " + fund_url))
             result['quantity'] = -1
-        outQueue.put(result)
+        lock.acquire()
+        outQueue.put(['fund_nav_quantity', result])
+        lock.release()
 
 
 # 检查净值数据数量
 def checkNAV(internet= True):
     try:
-        if internet:
-            start = time.time()
-            pbar = tqdm(total=outQueue.qsize(),dynamic_ncols=True)
-            while not outQueue.empty():  # 启动outQueue时队列已经稳定
-                result = outQueue.get()
-                pbar.update(1)
-                if (result['quantity'] !=-1) and (len(result['quantity'])<15):
-                    mySQL.insertData('fund_nav_quantity', result)
-            pbar.close()
-            end = time.time()
-            logger.info("Time used to archive NAV quantity from Internet: " + str(end - start))
-
+        # if internet:
+        #     start = time.time()
+        #     pbar = tqdm(total=outQueue.qsize(),dynamic_ncols=True)
+        #     while not outQueue.empty():  # 启动outQueue时队列已经稳定
+        #         result = outQueue.get()
+        #         pbar.update(1)
+        #         if (result['quantity'] !=-1) and (len(result['quantity'])<15):
+        #             mySQL.insertData('fund_nav_quantity', result)
+        #     pbar.close()
+        #     end = time.time()
+        #     logger.info("Time used to archive NAV quantity from Internet: " + str(end - start))
         end = time.time()
         fundsCheck = mySQL.queryData('fund_nav_quantity')
-        df_nav = mySQL.queryNAVQuantity('fund_nav')  # from DB
-        df_cur = mySQL.queryNAVQuantity('fund_nav_currency')  # from DB
+        sql_1,sql_2 = "select distinct fund_code, count(*) from (select distinct * from ",") t group by fund_code"
+        df_nav = mySQL.sql(sql_1+'fund_nav'+sql_2)  # from DB
+        df_cur = mySQL.sql(sql_1+'fund_nav_currency'+sql_2) # from DB
         df_nav = pd.concat([df_nav, df_cur], axis=0)
-        fundsCheck = pd.merge(fundsCheck, df_nav, how='left', on=['fund_code'])
+        fundsCheck = pd.merge(fundsCheck, pd.DataFrame(df_nav,columns= ['fund_code','quantityFromDB']), how='left', on=['fund_code'])
         start = time.time()
         logger.info("Time used to query NAV quantity from DB: " + str(start - end))
 
-        fundsCheck['pct'] = fundsCheck.apply(
-            lambda x: pd.to_numeric(x['quantityFromDB'], errors='coerce') / pd.to_numeric(x['quantity'],errors='coerce'), axis=1)
-        fundsCheck['diff'] = fundsCheck.apply(
-            lambda x: pd.to_numeric(x['quantity'], errors='coerce') - pd.to_numeric(x['quantityFromDB'],errors='coerce'), axis=1)
-        fundsCheck.to_csv('../out/1-fundsCheck_%s.csv'%str(time.strftime('%Y%m%d%H%M%S', time.localtime(time.time()))), index=False)
+        fundsCheck[['quantityFromDB','quantity']] = fundsCheck[['quantityFromDB','quantity']].to_numeric(errors='coerce')
+        fundsCheck['pct'] = fundsCheck.apply(lambda x: x['quantityFromDB']/x['quantity'], axis=1)
+        fundsCheck['diff'] = fundsCheck.apply(lambda x: x['quantity'] - x['quantityFromDB'], axis=1)
+        # fundsCheck.to_csv('../out/1-fundsCheck_%s.csv'%str(time.strftime('%Y%m%d', time.localtime(time.time()))), index=False)
+        fundsCheck.to_csv('../out/1-fund_check.csv',index=False)
     except Exception as e:
         logger.exception(str('NAV QUANTITY CHECK FAIL: ' + " %s" % e))
 
@@ -423,14 +429,12 @@ def checkNAV(internet= True):
 def exportTable(tab):
     try:
         pd.DataFrame(mySQL.queryData(tab)).to_csv('../out/1-%s.csv' % tab,index=False)
-        msg = str('EXPORT TABLES %s Succeed!' % tab)
-        logger.info(msg)
+        logger.info(str('EXPORT TABLES %s Succeed!' % tab))
     except Exception as e:
-        msg = str('EXPORT TABLES %s Fail:\n%s' % (tab, e))
-        logger.exception(msg)
+        logger.exception(str('EXPORT TABLES %s Fail:\n%s' % (tab, e)))
 
 
-class baseThread(threading.Thread): # TODO get process/ IO thread into Class
+class baseThread(threading.Thread):
     def __init__(self, func):
         super(baseThread, self).__init__()  # 调用父类的构造函数
         self.func = func  # 传入线程函数逻辑
@@ -440,9 +444,10 @@ class baseThread(threading.Thread): # TODO get process/ IO thread into Class
         self.func()
 
 
-def processThread():  # combine thread(worker) /queue(task) / function(procedure)
+def processWorker():  # combine thread(worker) /queue(task) / function(procedure)
     while not inQueue.empty():  # 启动outQueue时队列已经稳定
         item = inQueue.get()  #获得任务
+        retry = item[3]
         try:
             if item[1] =='NAV':
                 fundSpiders.getFundNav(item[0], item[2],True,True)  # fund_code, update = False(全量)/True(增量),silent_flag, multi_flag
@@ -453,13 +458,17 @@ def processThread():  # combine thread(worker) /queue(task) / function(procedure
                 pass
             inQueue.task_done()
             logger.info(' ' *70+'[' + item[0] + '] Done!')
-            time.sleep(2)
+            time.sleep(process_sleep)
         except Exception as e:
-            logger.exception(str('processThread FAIL [' + item[0] + ']\n' + " %s" % e))
-            inQueue.task_done()  # TODO retry logic
+            if retry>0:
+                logger.exception(str('processWorker FAIL [' + item[0] + '] - retry in queue!'))
+                inQueue.put([item[0],item[1],item[2],(retry-1)])
+            else:
+                logger.exception(str('processWorker FAIL [' + item[0] + '] - reached max retry times! \n' + " %s" % e))
+                inQueue.task_done()
 
 
-def IOThread():
+def IOWorker(): # combine thread(worker) /queue(task) / function(procedure)
     while (not outQueue.empty()) or (not process_finish):  # 启动时outQueue 还在put
         if not process_finish:
             item = outQueue.get()
@@ -481,18 +490,15 @@ def IOThread():
             break
 
 
-# 功能选择对话
 def welcome():
     logger.info('\nPlz input no. to execute commands:\n'
-                '1.Update all FUND INFO & MANAGER INFO(& export)\n'
-                '2.Update all NAV INFO(& export)\n'
-                '3.Update last 49 days NAV INFO(& export)\n'
-                '4.Update all MANAGER HISTORY(& export)\n'
+                '1.Update all FUND INFO & MANAGER INFO\n'
+                '2.Update all NAV INFO\n'
+                '3.Update last 49 days NAV INFO\n'
+                '4.Update all MANAGER HISTORY\n'
                 '5.Just Check NAV INFO\n'
                 '6.Export all TABLES\n'
-                '7.Update ONE FUND INFO & MANAGER INFO(& export)\n'
-                '8.Update ONE NAV INFO(& export)\n'
-                '9.Update ONE MANAGER HISTORY(& export)\n'
+                '7.Update ONE FUND \n'
                 '0.Exit\n'
                 '\n'
                 'Command NO.: ')
@@ -505,20 +511,21 @@ def welcome():
 
 
 def main():
-    global mySQL,sleep_time, isproxy, proxy, header, fundSpiders, inQueue,outQueue, lock, process_finish, fund_count, count
+    global mySQL,request_sleep, isproxy, proxy, header, fundSpiders, inQueue,outQueue, lock, process_finish, process_sleep,fund_count, count
     mySQL = PyMySQL.PyMySQL()
     mySQL._init_('localhost', 'root', 'JONC', 'fund')  # host/user/password/database
 
     isproxy = 0  # 如需要使用代理，改为1，并设置代理IP参数 proxy
     proxy = {"http": "http://110.37.84.147:8080", "https": "http://110.37.84.147:8080"}  # 这里需要替换成可用的代理IP
     header = randHeader()
-    sleep_time = 0.2
+    request_sleep = 0.2
     fundSpiders = FundSpiders()
 
     inQueue = queue.Queue()
     outQueue = queue.Queue()
     lock = threading.Lock()
     process_finish = False
+    process_sleep = 2
 
     funds = fundSpiders.getFundCodesFromCsv()
     fund_count = len(funds)
@@ -529,23 +536,23 @@ def main():
         multiProcessing = int(input('Number of process: '))
         # multiProcessing = 100
 
-        if n == 1:  # 1.Update all FUND INFO & MANAGER INFO(& export)
+        if n == 1:  # 1.Update all FUND INFO & MANAGER INFO
             # scape & import
             [fundSpiders.getFundInfo(fund) for fund in funds]  # fund info 全量
             [fundSpiders.getFundManagers(fund) for fund in funds]  # manager info, 全量
-            # export
-            [exportTable(tab) for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg']]
-        elif (n == 2 or n == 3):  # 2.Update all NAV INFO(& export)/3.Update last 60 days NAV INFO(& export)
+            # # export
+            # [exportTable(tab) for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg']]
+        elif (n == 2 or n == 3):  # 2.Update all NAV INFO/3.Update last 60 days NAV INFO
             flag = (False if n == 2 else True)
             if multiProcessing <=1:
                 # scape & import
                 [fundSpiders.getFundNav(fund, update=flag) for fund in funds]  # nav info, update = False(全量)/True(增量)
             else:  # multiple thread
                 start = time.time()
-                [inQueue.put([fund, 'NAV', flag]) for fund in funds]  # create process queue ->fund_code/ func/ arg
+                [inQueue.put([fund, 'NAV', flag,3]) for fund in funds]  # create process queue ->fund_code/ func/ arg/ max retry time
 
-                threads = [baseThread(processThread) for _ in range(multiProcessing)]  # create process thread
-                threads.append(baseThread(IOThread)) # create IO thread
+                threads = [baseThread(processWorker) for _ in range(multiProcessing)]  # create process thread
+                threads.append(baseThread(IOWorker)) # create IO thread
                 [thread.start() for thread in threads]  # start thread
 
                 [thread.join() for thread in threads[:-1]]  # wait until all process finishes tasks
@@ -554,50 +561,50 @@ def main():
                 outQueue.join() # wait until all data to be transferred
                 threads[-1].join()
                 logger.info('Time used multithreading scraping NAV: %s' % str(time.time() - start))
-            # migrate
-            mySQL.migrateTable('fund_nav','fund_nav_slave')
-            mySQL.migrateTable('fund_nav_currency', 'fund_nav_currency_slave') # todo here
-            # export
-            [exportTable(tab) for tab in ['fund_nav', 'fund_nav_currency']]
-        elif n == 4:  # 4.Update all MANAGER HISTORY(& export)
+            # # migrate
+            # mySQL.migrateTable('fund_nav','fund_nav_slave')
+            # mySQL.migrateTable('fund_nav_currency', 'fund_nav_currency_slave')
+            # # export
+            # [exportTable(tab) for tab in ['fund_nav', 'fund_nav_currency']]
+        elif n == 4:  # 4.Update all MANAGER HISTORY
             # scape & import
             fundSpiders.getFundManagersHistory()  # manager history, 全量 # todo multithread
-            # export
-            exportTable('fund_managers_his')
+            # # export
+            # exportTable('fund_managers_his')
         elif n == 5: # 5.Just Check NAV INFO
             # from internet
             start = time.time()
-            [inQueue.put([fund, 'QUANTITY', None]) for fund in funds]  # build process queue ->fund_code/ func/ arg
-            threads = [baseThread(processThread) for _ in range(multiProcessing)]  # create process thread
+            [inQueue.put([fund, 'QUANTITY', None,3]) for fund in funds]  # build process queue ->fund_code/ func/ arg/ max retry time
+
+            threads = [baseThread(processWorker) for _ in range(multiProcessing)]  # create process thread
+            threads.append(baseThread(IOWorker))  # create IO thread
             [thread.start() for thread in threads]  # start thread
-            [thread.join() for thread in threads]  # wait until all process finishes tasks
-            inQueue.join()
+
+            [thread.join() for thread in threads[:-1]]  # wait until all process finishes tasks
+            inQueue.join()  # wait until all tasks to be done
+            process_finish = True
+            outQueue.join()  # wait until all data to be transferred
+            threads[-1].join()
             logger.info('Time used to multithreading scraping NAV quantity: %s ' % str(time.time() - start))
             # to database
-            checkNAV()
+            checkNAV(internet= True)
         elif n == 6:  # 6.Export all TABLES
             # export
             for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg', 'fund_nav', 'fund_nav_currency','fund_managers_his']:
                 exportTable(tab)
-        elif n == 7:  # 7.Update ONE FUND INFO & MANAGER INFO(& export)
+        elif n == 7:  # 7.Update ONE FUND
             logger.info('\nPlz input FUND_CODE:\n')
             fund = sys.stdin.readline().strip('\n')
             if len(fund) ==6:
                 fundSpiders.getFundInfo(fund)  # fund info
                 fundSpiders.getFundManagers(fund)  # manager info
-                # export
-                [exportTable(tab) for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg']]
+                fundSpiders.getFundNav(fund, update=False)  # nav info, update = False(全量)/True(增量)
+                # # export
+                # [exportTable(tab) for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg']]
             else:
                 logger.exception('INVALID INPUT\n')
-        elif n == 8:  # 8.Update ONE NAV INFO(& export)
-            logger.info('\nPlz input FUND_CODE:\n')
-            fund = sys.stdin.readline().strip('\n')
-            if len(fund) ==6:
-                fundSpiders.getFundNav(fund, update= False)  # nav info, update = False(全量)/True(增量)
-                # export
-                [exportTable(tab) for tab in ['fund_nav', 'fund_nav_currency']]
-            else:
-                logger.exception('INVALID INPUT\n')
+        elif n == 8:
+            print('TBC')
         elif n == 9:
             print('TBC')
         else:

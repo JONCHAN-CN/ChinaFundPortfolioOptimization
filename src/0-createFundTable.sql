@@ -32,11 +32,10 @@ CREATE TABLE IF NOT EXISTS `fund_info` (
   PRIMARY KEY (`fund_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金基本信息表';
  
- 
 DROP TABLE IF  EXISTS fund_managers_chg; 
 CREATE TABLE IF NOT EXISTS `fund_managers_chg` (
 	`fund_code` varchar(255) NOT NULL COMMENT '基金代码',
-	`start_date` varchar(255) DEFAULT NULL COMMENT '起始期',
+	`start_date` varchar(255) NOT NULL COMMENT '起始期',
 	`end_date` varchar(255) DEFAULT NULL COMMENT '截止期', 
 	`fund_managers` varchar(255) DEFAULT NULL COMMENT '基金经理',
 	`term` varchar(255) DEFAULT NULL COMMENT '任职期间',
@@ -44,7 +43,7 @@ CREATE TABLE IF NOT EXISTS `fund_managers_chg` (
 	`created_date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
 	`updated_date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
 	`data_source` varchar(255) DEFAULT NULL COMMENT '数据来源',
-	PRIMARY KEY (`fund_code`)
+	PRIMARY KEY (`fund_code`,`start_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金经理变动一览表';
  
 DROP TABLE IF  EXISTS fund_managers_info;
@@ -93,11 +92,12 @@ CREATE TABLE IF NOT EXISTS `fund_managers_his` (
 	`manager_id` varchar(255) NOT NULL COMMENT '基金经理ID',
 	`manager_url` varchar(255) DEFAULT NULL COMMENT '链接',
 	`manager_name` varchar(255) DEFAULT NULL COMMENT '基金经理名称',
-	`fund_code` varchar(255) DEFAULT NULL COMMENT '基金ID',
+	`cum_on_duty_term` varchar(255) NOT NULL COMMENT '累计任职时间',
+	`fund_code` varchar(255) NOT NULL COMMENT '基金ID',
 	`fund_name` varchar(255) DEFAULT NULL COMMENT '基金名称',
 	`fund_type` varchar(255) DEFAULT NULL COMMENT '基金类型',
 	`fund_scale` varchar(255) DEFAULT NULL COMMENT '基金规模（亿元）',
-	`start_date` varchar(255) DEFAULT NULL COMMENT '起始期',
+	`start_date` varchar(255) NOT NULL COMMENT '起始期',
 	`end_date` varchar(255) DEFAULT NULL COMMENT '止期',
 	`term` varchar(255) DEFAULT NULL COMMENT '任期时长',
 	`return_rate` varchar(255) DEFAULT NULL COMMENT '回报率',	
@@ -106,5 +106,44 @@ CREATE TABLE IF NOT EXISTS `fund_managers_his` (
 	PRIMARY KEY (`manager_id`,`fund_code`,`start_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金经理履历表'; 
 
+DROP TABLE IF  EXISTS fund_nav_quantity ;
+CREATE TABLE IF NOT EXISTS `fund_nav_quantity` (
+  `fund_code` varchar(255) NOT NULL,
+  `quantity` varchar(255) DEFAULT NULL,
+  `updated_date` datetime DEFAULT NULL,
+   PRIMARY KEY (`fund_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 
+
+-- side to asist
+replace into fund_nav select * from fund_nav_slave;
+replace into fund_nav_currency select * from fund_nav_currency_slave;
+
+truncate table fund_nav_currency_slave;
+truncate table fund_nav_slave;
+
+select fund_code,count(*) from fund_nav_slave group by fund_code;
+select * from fund_nav_slave;
+select count(*) from fund_nav_slave where fund_code =501053;
+
+select fund_code,count(*) from fund_nav_currency_slave group by fund_code;
+select * from fund_nav_currency_slave;
+
+
+
+select fund_code,count(*) from fund_nav group by fund_code;
+select count(*) from fund_nav where fund_code =671030;
+select * from fund_nav where fund_code =005784;
+
+select * from fund_info where fund_type ='货币型';
+
+show global variables like '%timeout%';
+set global net_read_timeout =100;
+show global variables like '%packet%';
+set global net_read_timeout =256*1024*1024;
+
+SELECT *
+FROM fund.fund_nav
+where nav != add_nav
+and fund_code = 202001;
