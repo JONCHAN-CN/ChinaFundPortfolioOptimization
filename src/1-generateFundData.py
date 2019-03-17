@@ -7,10 +7,10 @@
 '''
 
 import logging
+import os
 import queue
 import random
 import socket
-import sys
 import threading
 import time
 
@@ -18,13 +18,17 @@ import pandas as pd
 import requests
 import urllib3
 from bs4 import BeautifulSoup
-from tqdm import tqdm
 
+for dir in ['../log', '../out']:
+    if not os.path.exists(dir):
+        os.makedirs(dir)
+import sys
+sys.path.append('../')
 from src.utils import PyMySQL
 
 logging.basicConfig(level=logging.INFO,
                     filename='../log/1-generateFundData.log',
-                    filemode='a',
+                    filemode='w',
                     datefmt='%Y/%m/%d %H:%M:%S',
                     format='%(levelname)s %(asctime)s %(funcName)s %(lineno)d %(message)s'
                     )
@@ -109,8 +113,8 @@ class FundSpiders():
         return time.strftime('[%Y-%m-%d %H:%M:%S]', time.localtime(time.time()))
 
     def getFundCodesFromCsv(self):   # 从csv文件中获取基金代码清单（可从wind或者其他财经网站导出）
-        file_path = "../dep/TMP.csv"
-        # file_path = "../dep/1-fundCode_master.csv"
+        # file_path = "../dep/TMP.csv"
+        file_path = "../dep/1-fundCode.csv"
         fund_code = pd.read_csv(file_path, dtype=str)
         return fund_code.fund_code
 
@@ -393,33 +397,29 @@ class FundSpiders():
 
 
 # 检查净值数据数量
-def checkNAV(internet= True):
+def checkNAV():
     try:
-        # if internet:
-        #     start = time.time()
-        #     pbar = tqdm(total=outQueue.qsize(),dynamic_ncols=True)
-        #     while not outQueue.empty():  # 启动outQueue时队列已经稳定
-        #         result = outQueue.get()
-        #         pbar.update(1)
-        #         if (result['quantity'] !=-1) and (len(result['quantity'])<15):
-        #             mySQL.insertData('fund_nav_quantity', result)
-        #     pbar.close()
-        #     end = time.time()
-        #     logger.info("Time used to archive NAV quantity from Internet: " + str(end - start))
         end = time.time()
         fundsCheck = mySQL.queryData('fund_nav_quantity')
         sql_1,sql_2 = "select distinct fund_code, count(*) from (select distinct * from ",") t group by fund_code"
         df_nav = mySQL.sql(sql_1+'fund_nav'+sql_2)  # from DB
         df_cur = mySQL.sql(sql_1+'fund_nav_currency'+sql_2) # from DB
         df_nav = pd.concat([df_nav, df_cur], axis=0)
-        fundsCheck = pd.merge(fundsCheck, pd.DataFrame(df_nav,columns= ['fund_code','quantityFromDB']), how='left', on=['fund_code'])
+        fundsCheck = pd.merge(fundsCheck, df_nav, how='left', on=['fund_code'])
         start = time.time()
         logger.info("Time used to query NAV quantity from DB: " + str(start - end))
 
-        fundsCheck[['quantityFromDB','quantity']] = fundsCheck[['quantityFromDB','quantity']].to_numeric(errors='coerce')
-        fundsCheck['pct'] = fundsCheck.apply(lambda x: x['quantityFromDB']/x['quantity'], axis=1)
-        fundsCheck['diff'] = fundsCheck.apply(lambda x: x['quantity'] - x['quantityFromDB'], axis=1)
-        # fundsCheck.to_csv('../out/1-fundsCheck_%s.csv'%str(time.strftime('%Y%m%d', time.localtime(time.time()))), index=False)
+        fundsCheck[['count(*)', 'quantity']] = fundsCheck[['count(*)', 'quantity']].apply(pd.to_numeric)
+
+        def divide(x):
+            try:
+                res = x['count(*)'] / x['quantity']
+            except ZeroDivisionError:
+                res = -1
+            return res
+
+        fundsCheck['pct'] = fundsCheck.apply(divide, axis=1)
+        fundsCheck['diff'] = fundsCheck.apply(lambda x: x['quantity'] - x['count(*)'], axis=1)
         fundsCheck.to_csv('../out/1-fund_check.csv',index=False)
     except Exception as e:
         logger.exception(str('NAV QUANTITY CHECK FAIL: ' + " %s" % e))
@@ -469,26 +469,17 @@ def processWorker():  # combine thread(worker) /queue(task) / function(procedure
 
 
 def IOWorker(): # combine thread(worker) /queue(task) / function(procedure)
-    while (not outQueue.empty()) or (not process_finish):  # 启动时outQueue 还在put
-        if not process_finish:
-            item = outQueue.get()
-            try:
-                mySQL.insertData(item[0], item[1])  # 将结果存入数据库中
-            finally:
-                outQueue.task_done()
-        else:
-            logger.info('%d Total Left to I/O...' % int(outQueue.qsize()))
-            pbar = tqdm(total = outQueue.qsize(),ncols= 500)
-            while outQueue.qsize():  # 返回队列的大小
-                item = outQueue.get()
-                try:
-                    mySQL.insertData(item[0], item[1])  # 将结果存入数据库中
-                finally:
-                    pbar.update(1)
-                    outQueue.task_done()
-            pbar.close()
-            break
-
+    counter = 0
+    while outQueue.qsize():  # 返回队列的大小
+        item = outQueue.get()
+        try:
+            mySQL.insertData(item[0], item[1])  # 将结果存入数据库中
+        finally:
+            outQueue.task_done()
+            counter = counter + 1
+            if counter % 1000 == 0:
+                logger.info('Importing Data - %d/%d' % (counter, outQueue.qsize()))
+    logger.info('Finish importing Data - %d' % counter)
 
 def welcome():
     logger.info('\nPlz input no. to execute commands:\n'
@@ -540,8 +531,6 @@ def main():
             # scape & import
             [fundSpiders.getFundInfo(fund) for fund in funds]  # fund info 全量
             [fundSpiders.getFundManagers(fund) for fund in funds]  # manager info, 全量
-            # # export
-            # [exportTable(tab) for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg']]
         elif (n == 2 or n == 3):  # 2.Update all NAV INFO/3.Update last 60 days NAV INFO
             flag = (False if n == 2 else True)
             if multiProcessing <=1:
@@ -553,24 +542,14 @@ def main():
 
                 threads = [baseThread(processWorker) for _ in range(multiProcessing)]  # create process thread
                 threads.append(baseThread(IOWorker)) # create IO thread
-                [thread.start() for thread in threads]  # start thread
-
-                [thread.join() for thread in threads[:-1]]  # wait until all process finishes tasks
-                inQueue.join() # wait until all tasks to be done
-                process_finish = True
-                outQueue.join() # wait until all data to be transferred
-                threads[-1].join()
+                [thread.start() for thread in threads[:-1]]  # start process thread
+                time.sleep(60)
+                threads[-1].start()  # start IO thread
+                [thread.join() for thread in threads]  # wait until all process finishes tasks
                 logger.info('Time used multithreading scraping NAV: %s' % str(time.time() - start))
-            # # migrate
-            # mySQL.migrateTable('fund_nav','fund_nav_slave')
-            # mySQL.migrateTable('fund_nav_currency', 'fund_nav_currency_slave')
-            # # export
-            # [exportTable(tab) for tab in ['fund_nav', 'fund_nav_currency']]
         elif n == 4:  # 4.Update all MANAGER HISTORY
             # scape & import
             fundSpiders.getFundManagersHistory()  # manager history, 全量 # todo multithread
-            # # export
-            # exportTable('fund_managers_his')
         elif n == 5: # 5.Just Check NAV INFO
             # from internet
             start = time.time()
@@ -578,16 +557,13 @@ def main():
 
             threads = [baseThread(processWorker) for _ in range(multiProcessing)]  # create process thread
             threads.append(baseThread(IOWorker))  # create IO thread
-            [thread.start() for thread in threads]  # start thread
-
-            [thread.join() for thread in threads[:-1]]  # wait until all process finishes tasks
-            inQueue.join()  # wait until all tasks to be done
-            process_finish = True
-            outQueue.join()  # wait until all data to be transferred
-            threads[-1].join()
+            [thread.start() for thread in threads[:-1]]  # start process thread
+            time.sleep(60)
+            threads[-1].start()  # start IO thread
+            [thread.join() for thread in threads]  # wait until all process finishes tasks
             logger.info('Time used to multithreading scraping NAV quantity: %s ' % str(time.time() - start))
             # to database
-            checkNAV(internet= True)
+            checkNAV()
         elif n == 6:  # 6.Export all TABLES
             # export
             for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg', 'fund_nav', 'fund_nav_currency','fund_managers_his']:
@@ -599,8 +575,6 @@ def main():
                 fundSpiders.getFundInfo(fund)  # fund info
                 fundSpiders.getFundManagers(fund)  # manager info
                 fundSpiders.getFundNav(fund, update=False)  # nav info, update = False(全量)/True(增量)
-                # # export
-                # [exportTable(tab) for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg']]
             else:
                 logger.exception('INVALID INPUT\n')
         elif n == 8:
@@ -611,7 +585,7 @@ def main():
             logger.info('Bye~')
             break
 
-    ### close DB connection
+    # close DB connection
     mySQL.dispose()
 
 
