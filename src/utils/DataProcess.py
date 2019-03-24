@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Created on Mon Nov  5 19:02:10 2018
+
 @author: JON7390
 交易一期(基金)数据处理
 """
@@ -62,15 +63,15 @@ def exportTable(tab, name = None, freq = None, index_flag=False):
             tab.to_csv('../out/2-%s-%s.csv' % (name, freq), index=index_flag)
         else:
             tab.to_csv('../out/2-%s.csv' % name, index=index_flag)
-        logger.info(str('EXPORT TABLES %s Succeed!' % name))
+        logger.info(str('\nEXPORT TABLES %s Succeed!' % name))
     except Exception as e:
-        logger.exception(str('EXPORT TABLES %s Fail:%s' % (name, e)))
+        logger.exception(str('EXPORT TABLES %s Fail:\n%s' % (name, e)))
 
 
 # 处理Manager数据
 def processManager(mana_his,mana_info,mana_chg):
     # manager history
-    logger.info('Processing manager history...')
+    logger.info('\nProcessing manager history...')
     # stupid case
     name_error = [['WANG AO(汪澳)','汪澳'],['TIAN HUAN','TIAN_HUAN'],['DANIELDONGNINGSUN','孙东宁'],['IKEDA KAE','IKEDA_KAE']]
     for i in name_error:
@@ -105,7 +106,7 @@ def processManager(mana_his,mana_info,mana_chg):
     mana_score.drop_duplicates(inplace=True)
 
     # manager info
-    logger.info('Processing manager info...')
+    logger.info('\nProcessing manager info...')
     del mana_info['manager_name']
     mana_info = pd.merge(mana_info, mana_score, how='left', on='manager_id')
     mana_info.drop_duplicates(inplace=True)
@@ -113,7 +114,7 @@ def processManager(mana_his,mana_info,mana_chg):
     exportTable(mana_info,name = name, freq = None, index_flag=False)
 
     # manager changes on fund
-    logger.info('Processing manager chg on funds...')
+    logger.info('\nProcessing manager chg on funds...')
     # stupid case again
     name_error = [['WANG AO(汪澳)', '汪澳'], ['TIAN HUAN', 'TIAN_HUAN'], ['DANIELDONGNINGSUN', '孙东宁'],
                   ['IKEDA KAE', 'IKEDA_KAE'],['DANIEL DONGNING SUN', '孙东宁'],['SHI CHENG(史程)', '史程']]
@@ -158,7 +159,7 @@ def processManager(mana_his,mana_info,mana_chg):
     p_chg.drop_duplicates(inplace=True)
     name = 'MANAGER_chg'
     exportTable(p_chg, name=name, freq=None, index_flag=False)
-    logger.info('Done processing MANAGER!\n')
+    logger.info('\nDone processing MANAGER!')
     return mana_info,p_chg
 
 
@@ -181,15 +182,16 @@ def processNAV(db, frequency='BM',export = False):
             else: pass
         else:
             name = 'NAV'
+            # db['cum_nav_chg_rate'] = pd.to_numeric(db['nav_chg_rate'].apply(lambda x: float(str(x).strip('%'))/100).fillna(0), errors='coerce')+1
             db['nav'] = pd.to_numeric(db['nav'], errors='coerce') #todo 分红如何处理？算回去？
             db = db.pivot('the_date', 'fund_code', 'nav').fillna(method='ffill').resample(frequency).asfreq()
         calNAVStat(db,name) # cal statistic
         if export:
             exportTable(db,name = name, freq = frequency, index_flag=False) # export
-        logger.info(str('Done processing - [%s-%s]\n' % (name, frequency)))
+        logger.info(str('\nDone processing - [%s-%s]' % (name, frequency)))
         return db
     except Exception as e:
-        logger.exception(str('FAIL to process - [%s-%s] \n%s\n' % (name, frequency, e)))
+        logger.exception(str('\nFAIL to process - [%s-%s] \n%s' % (name, frequency, e)))
         return 1
 
 
@@ -201,12 +203,9 @@ def main():
     cur = processNAV(cur, frequency='BM',export = False) # annualised return rate by frequency
 
     # manager
-    mana_his = pd.read_csv('../out/1-fund_managers_his.csv', dtype=str)
-    mana_info = pd.read_csv('../out/1-fund_managers_info.csv', dtype=str)
-    mana_chg = pd.read_csv('../out/1-fund_managers_chg.csv', dtype=str)
-    processManager(mana_his, mana_info, mana_chg)
+    processManager()
 
-    # TODO: fund_info
+    # TODO: fund_info??
 
 if __name__ == "__main__":
     main()
