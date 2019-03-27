@@ -4,10 +4,12 @@
 A Python implementation of [Harry  Markowitz](https://en.m.wikipedia.org/wiki/Harry_Markowitz)'s [Portfolio Theory](https://wiki.mbalib.com/wiki/%E6%8A%95%E8%B5%84%E7%BB%84%E5%90%88%E7%90%86%E8%AE%BA) with fund data of China market.
 
 **说明/Notes**
+
 本项目部分代码源自网络，经修改后达到项目目的。原代码的作者与出处细列如下。
 Part of code in the project was from Internet, and been fitted into this project. Cited code, authors and original posts are listed below.
 
 [【Python 量化投资系列】python3 获取基金及历史净值数据](https://blog.csdn.net/yuzhucu/article/details/55261024) by [yuzhucu](https://blog.csdn.net/yuzhucu)
+
 [The Efficient Frontier: Markowitz portfolio optimization in Python](https://blog.quantopian.com/markowitz-portfolio-optimization-2/) by [Thomas ](https://blog.quantopian.com/author/twiecki/)
 
 ## 环境
