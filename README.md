@@ -8,15 +8,34 @@ A Python implementation of [Harry  Markowitz](https://en.m.wikipedia.org/wiki/Ha
 Part of code in the project was from Internet, and been fitted into this project. Cited code, authors and original posts are listed below.
 
 [【Python 量化投资系列】python3 获取基金及历史净值数据](https://blog.csdn.net/yuzhucu/article/details/55261024) by [yuzhucu](https://blog.csdn.net/yuzhucu)
-
 [The Efficient Frontier: Markowitz portfolio optimization in Python](https://blog.quantopian.com/markowitz-portfolio-optimization-2/) by [Thomas ](https://blog.quantopian.com/author/twiecki/)
 
 ## 环境
 Windows 10/ Python 3.6/ MySQL Community 8.0
+
 ## 文件说明
-structure here
+├─dep
+--│1-fundCode&Name.csv  -> code & name of funds in China market
+--│1-fundCode.csv
+├─log   -> log folder, will be created by script if not exist
+├─out ->  output folder, will be created by script if not exist
+└─src
+--│ 0-createFundTable.sql -> script to create tables in MySQL
+--│ 1-generateFundData.py -> script to scrapy fund data from [eastmoney.com](http://www.eastmoney.com/)
+--│ 2-generateFundPortfolio.py -> script to build model
+--│ equirements.txt
+--└─utils
+----│ DataProcess.py -> script to process data before modeling 
+----│ PyMySQL.py
+
 ## Create Tables in MySQL
-0 here
+ `fund_info` -> `基金基本信息表`
+ `fund_managers_chg` ->`基金经理变动一览表`
+ `fund_managers_info` ->`基金经理信息基表`
+  `fund_managers_his` -> `基金经理履历表`
+`fund_nav`-> `非货币型基金净值表`
+ `fund_nav_currency` -> `货币型基金净值表`
+ `fund_nav_quantity` -> `基金净值数量表`
 ## Scapy Fund Data from Internet 
 1 here
 ## Data Processing
