@@ -6,6 +6,7 @@ A Python implementation of [Harry  Markowitz](https://en.m.wikipedia.org/wiki/Ha
 **说明/Notes**
 
 本项目部分代码源自网络，经修改后达到项目目的。原代码的作者与出处细列如下。
+
 Part of code in the project was from Internet, and been fitted into this project. Cited code, authors and original posts are listed below.
 
 [【Python 量化投资系列】python3 获取基金及历史净值数据](https://blog.csdn.net/yuzhucu/article/details/55261024) by [yuzhucu](https://blog.csdn.net/yuzhucu)
@@ -80,20 +81,26 @@ Windows 10/ Python 3.6/ MySQL Community 8.0
 -  计算**经理在行时间与比率**/Calculate **managers' cumulative on-duty  term & percentage**
 -  计算**基金年均收益率**/Calculate **fund based annual return rate**
 - 计算**经理年均收益评分**/Calculate **manager based annual return score**
--- $\frac{r*w*\sum_0^nt}{\sum_0^nt}$,
+
+-- $\frac{r*w*\sum_0^nt}{\sum_0^nt}$
+
 --`r` for `manager based annual return rate`
+
 --`w` for `weight based on year of served term`
+
 --`t` for `duration of served term` 
 
 ## Modeling
 **筛选基金/Filtering Fund**
 
 由于算法通过组合基金、采样列举计算凸优化的方法进行计算，数据量大时运行缓慢。这里利用`数据处理`中生成的`4个指标`（上文粗体）筛选基金，减少后续计算量。
+
 Due to large demand of computational capacity to finish convex optimizaton of the combination of funds, we fisrt filter some funds based on the `4 metrics` (bold font mentioned above)computed in `Data Processing` to reduce computation in next step.
 
 **切分数据/Spliting Data**
 
 切分数据为`训练组`和`回测组`（理论上，只取最后一周期）。
+
 Spliting Data into `train set` and `backtest set`(1 period of data, theoratically)
 
 **计算投资组合**
@@ -102,6 +109,7 @@ Spliting Data into `train set` and `backtest set`(1 period of data, theoraticall
 - 最大夏普比率组合/Portfolio w/ maximum Sharpe Ratio
 - 最小风险组合/Portfolio w/ minium Risk 
 - 默认组合/ Default portfolio
+
 
 每一个组合包含/ Each portfolio contains:
 
