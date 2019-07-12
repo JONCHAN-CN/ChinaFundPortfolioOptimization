@@ -1,5 +1,7 @@
 --create DATABASE fund;
-use fund;
+--use fund;
+
+
 DROP TABLE IF  EXISTS fund_info ;
 CREATE TABLE IF NOT EXISTS `fund_info` (
   `fund_code` varchar(255) NOT NULL COMMENT '基金代码',
@@ -32,6 +34,7 @@ CREATE TABLE IF NOT EXISTS `fund_info` (
   PRIMARY KEY (`fund_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金基本信息表';
  
+ 
 DROP TABLE IF  EXISTS fund_managers_chg; 
 CREATE TABLE IF NOT EXISTS `fund_managers_chg` (
 	`fund_code` varchar(255) NOT NULL COMMENT '基金代码',
@@ -46,6 +49,7 @@ CREATE TABLE IF NOT EXISTS `fund_managers_chg` (
 	PRIMARY KEY (`fund_code`,`start_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金经理变动一览表';
  
+ 
 DROP TABLE IF  EXISTS fund_managers_info;
 CREATE TABLE IF NOT EXISTS `fund_managers_info` (
 	`manager_id` varchar(255) NOT NULL COMMENT '基金经理ID',
@@ -57,9 +61,10 @@ CREATE TABLE IF NOT EXISTS `fund_managers_info` (
 	PRIMARY KEY (`manager_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金经理信息基表'; 
  
+ 
 DROP TABLE IF  EXISTS fund_nav ;
 CREATE TABLE IF NOT EXISTS `fund_nav` (
-  `the_date` varchar(255) NOT NULL,
+  `date` varchar(255) NOT NULL,
   `nav` varchar(255) DEFAULT NULL,
   `add_nav` varchar(255) DEFAULT NULL,
   `nav_chg_rate` varchar(255) DEFAULT NULL,
@@ -70,11 +75,12 @@ CREATE TABLE IF NOT EXISTS `fund_nav` (
   `created_date` datetime DEFAULT NULL,
   `updated_date` datetime DEFAULT NULL,
    PRIMARY KEY (`the_date`,`fund_code`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='非货币基金净值表';
+ 
  
 DROP TABLE IF  EXISTS fund_nav_currency ;
 CREATE TABLE IF NOT EXISTS  `fund_nav_currency` (
-  `the_date` varchar(255) NOT NULL,
+  `date` varchar(255) NOT NULL,
   `fund_code` varchar(255) NOT NULL,
   `profit_per_units` varchar(255) DEFAULT NULL,
   `profit_rate` varchar(255) DEFAULT NULL,
@@ -85,7 +91,8 @@ CREATE TABLE IF NOT EXISTS  `fund_nav_currency` (
   `created_date` datetime DEFAULT NULL,
   `updated_date` datetime DEFAULT NULL,
   PRIMARY KEY (`the_date`,`fund_code`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='货币基金净值表';
+
 
 DROP TABLE IF  EXISTS fund_managers_his;
 CREATE TABLE IF NOT EXISTS `fund_managers_his` (
@@ -106,14 +113,50 @@ CREATE TABLE IF NOT EXISTS `fund_managers_his` (
 	PRIMARY KEY (`manager_id`,`fund_code`,`start_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金经理履历表'; 
 
+
 DROP TABLE IF  EXISTS fund_nav_quantity ;
 CREATE TABLE IF NOT EXISTS `fund_nav_quantity` (
   `fund_code` varchar(255) NOT NULL,
   `quantity` varchar(255) DEFAULT NULL,
   `updated_date` datetime DEFAULT NULL,
    PRIMARY KEY (`fund_code`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金净值数量表'; 
 
+
+CREATE TABLE `fund_portfolio_3` (
+  `id` int(15) NOT NULL AUTO_INCREMENT,
+  `fundCode_0` varchar(255) NOT NULL,
+  `fundCode_1` varchar(255) NOT NULL,
+  `fundCode_2` varchar(255) NOT NULL,
+  `portfolio_0` float NOT NULL,
+  `portfolio_1` float NOT NULL,
+  `portfolio_2` float NOT NULL,
+  `returns` float NOT NULL,
+  `risks` float NOT NULL,
+  `sharpeRatio` float NOT NULL,
+   `annual_return_score` float NOT NULL,
+  `cum_on_duty_term_pct` float NOT NULL,
+  `annual_return_fund` float NOT NULL,
+  `term` float NOT NULL,
+  `weighted_annual_return_score` float NOT NULL,
+  `mode` varchar NOT NULL,
+  `label` varchar(255) DEFAULT NULL,
+  `train_date` datetime NOT NULL,
+  `expire_date` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金配资表（3位）'
+
+
+CREATE TABLE `fund_backtest_3` (
+  `id` int(15) NOT NULL,
+  `est_returns` float NOT NULL,
+  `act_returns` float NOT NULL,
+  `time_delay` int(11) NOT NULL,
+  `backtest_date` datetime NOT NULL,
+  `expire_flag` tinyint(1) DEFAULT NULL,
+  PRIMARY KEY (`id`,`backtest_date`),
+  CONSTRAINT `fund_backtest_3_ibfk_1` FOREIGN KEY (`id`) REFERENCES `fund_portfolio_3` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金回测表（3位）'
 
 
 -- side to asist

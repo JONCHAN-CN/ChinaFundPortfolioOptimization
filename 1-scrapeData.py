@@ -6,34 +6,30 @@
 @author: JON7390
 '''
 
-import logging
 import os
 import queue
 import random
 import socket
+import sys
 import threading
 import time
+from datetime import datetime as dt
 
 import pandas as pd
 import requests
 import urllib3
+import yaml
 from bs4 import BeautifulSoup
 
-for dir in ['../log', '../out']:
+from utils import PyMySQL, logger
+
+logger = logger.init_logger('./log/1-generateFundData_%s.log' % dt.now().strftime('%Y-%m-%d'))
+cfp = yaml.load(open('./dep/config.yaml', 'r'))
+db = [*cfp['MySQL'].values()]  # unpack dict to get dict value
+
+for dir in ['./out']:
     if not os.path.exists(dir):
         os.makedirs(dir)
-import sys
-sys.path.append('../')
-from src.utils import PyMySQL
-
-logging.basicConfig(level=logging.INFO,
-                    filename='../log/1-generateFundData.log',
-                    filemode='w',
-                    datefmt='%Y/%m/%d %H:%M:%S',
-                    format='%(levelname)s %(asctime)s %(funcName)s %(lineno)d %(message)s'
-                    )
-logger = logging.getLogger('main')
-logger.addHandler(logging.StreamHandler())  # 输出到控制台的handler
 
 
 # 随机生成User-Agent
@@ -114,7 +110,7 @@ class FundSpiders():
 
     def getFundCodesFromCsv(self):   # 从csv文件中获取基金代码清单（可从wind或者其他财经网站导出）
         # file_path = "../dep/TMP.csv"
-        file_path = "../dep/1-fundCode.csv"
+        file_path = "./dep/1-fundCode.csv"
         fund_code = pd.read_csv(file_path, dtype=str)
         return fund_code.fund_code
 
@@ -235,7 +231,7 @@ class FundSpiders():
 
     # 获取基金经理履历数据 - 基金经理履历数据
     def getFundManagersHistory(self):
-        manaList = pd.DataFrame(mySQL.queryData('fund_managers_info'))
+        manaList = pd.DataFrame(mySQL.selectDistinct('fund_managers_info'))
         manaList = manaList[['manager_id','url','manager_name']].drop_duplicates()
         mana_count = len(manaList)
         for i in range(mana_count):
@@ -307,7 +303,7 @@ class FundSpiders():
         if not update:
             pages = int(pages)
         else:
-            pages = 1
+            pages = 6
 
         # 根据基金代码和总记录数，分页返回所有历史净值
         i = 0  # 基金总record数
@@ -400,7 +396,7 @@ class FundSpiders():
 def checkNAV():
     try:
         end = time.time()
-        fundsCheck = mySQL.queryData('fund_nav_quantity')
+        fundsCheck = mySQL.selectDistinct('fund_nav_quantity')
         sql_1,sql_2 = "select distinct fund_code, count(*) from (select distinct * from ",") t group by fund_code"
         df_nav = mySQL.sql(sql_1+'fund_nav'+sql_2)  # from DB
         df_cur = mySQL.sql(sql_1+'fund_nav_currency'+sql_2) # from DB
@@ -428,7 +424,7 @@ def checkNAV():
 # 导出表格为csv
 def exportTable(tab):
     try:
-        pd.DataFrame(mySQL.queryData(tab)).to_csv('../out/1-%s.csv' % tab,index=False)
+        pd.DataFrame(mySQL.selectDistinct(tab)).to_csv('../out/1-%s.csv' % tab, index=False)
         logger.info(str('EXPORT TABLES %s Succeed!' % tab))
     except Exception as e:
         logger.exception(str('EXPORT TABLES %s Fail:\n%s' % (tab, e)))
@@ -504,7 +500,7 @@ def welcome():
 def main():
     global mySQL,request_sleep, isproxy, proxy, header, fundSpiders, inQueue,outQueue, lock, process_finish, process_sleep,fund_count, count
     mySQL = PyMySQL.PyMySQL()
-    mySQL._init_('localhost', 'root', 'JONC', 'fund')  # host/user/password/database
+    mySQL._init_(*db)
 
     isproxy = 0  # 如需要使用代理，改为1，并设置代理IP参数 proxy
     proxy = {"http": "http://110.37.84.147:8080", "https": "http://110.37.84.147:8080"}  # 这里需要替换成可用的代理IP
