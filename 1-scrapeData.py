@@ -476,6 +476,8 @@ def IOWorker(): # combine thread(worker) /queue(task) / function(procedure)
             if counter % 1000 == 0:
                 logger.info('Importing Data - %d/%d' % (counter, outQueue.qsize()))
     logger.info('Finish importing Data - %d' % counter)
+    # TODO different table to execute many
+
 
 def welcome():
     logger.info('\nPlz input no. to execute commands:\n'
