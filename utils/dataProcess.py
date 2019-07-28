@@ -16,7 +16,7 @@ from .utils import calNAVStat, exportTable, stripTerm, calAnnualReturn, replaceM
 logger = logging.getLogger('main.DataProcess')
 
 
-@try_exception()
+@try_exception
 def processManaHis(mana_his):
     logger.info('\nProcessing manager history...')
 
@@ -40,7 +40,7 @@ def processManaHis(mana_his):
     return mana_his
 
 
-@try_exception()
+@try_exception
 def processManaChg(mana_chg):
     logger.info('\nProcessing manager chg on funds...')
     mana_chg.drop(columns=['created_date'], inplace=True)
@@ -62,7 +62,7 @@ def processManaChg(mana_chg):
     return mana_chg
 
 
-@try_exception()
+@try_exception
 def processManaInfo(mana_info, mana_score):
     logger.info('\nProcessing manager info...')
     # merge
@@ -77,7 +77,7 @@ def processManaInfo(mana_info, mana_score):
     return mana_info
 
 
-@try_exception()
+@try_exception
 def genManaScore(mana_his):
     logger.info('Calculating manager score...')
 
@@ -105,7 +105,7 @@ def genManaScore(mana_his):
     return mana_score
 
 
-@try_exception()
+@try_exception
 def mergeMana(mana_chg, mana_his, mana_info):
     p_chg = pd.DataFrame()
 
@@ -180,26 +180,42 @@ def processManager(mana_his_path, mana_info_path, mana_chg_path, res_mana_chg_pa
     return mana_info, p_chg
 
 
-@try_exception()
+@try_exception
 def processNAV(df, frequency='BM', export=False):
     '''clean/ process NAV data according to frquency'''
     logger.info('Processing NAV...')
-    name = ''
     df['date'] = df['date'].astype('datetime64[D]')
 
     # process
-    if df.shape[1] == 9:
-        name = 'CURRENCY'
-        df['profit_rate'] = df['profit_rate'].apply(lambda x: str(x).strip('%')).fillna(0).astype('float') / 100
-        df['date_m'] = df['date'].apply(lambda x: str(x)[:7])
-        df = df.groupby(['fund_code', 'date_m'], as_index=False)['profit_rate'].mean()
-        df = df.pivot('date_m', 'fund_code', 'profit_rate').fillna(method='ffill')
-        df = (df / 12) if 'M' in frequency else df
-        df = (df / 4) if 'Q' in frequency else df
-    else:
-        name = 'NAV'
-        df['nav'] = df['nav'].astype('float')  # todo how to deal w/ div_rec
-        df = df.pivot('date', 'fund_code', 'nav').fillna(method='ffill').resample(frequency).asfreq()
+    name = 'NAV'
+    df['nav'] = df['nav'].astype('float')  # TODO how to deal w/ div_rec
+    df = df.pivot('date', 'fund_code', 'nav').fillna(method='ffill').resample(frequency).asfreq()
+
+    # cal statistic
+    calNAVStat(df, name)
+
+    # export table
+    if export:
+        exportTable(df, name=name, freq=frequency, index_flag=False)
+
+    logger.info(str('\nDone processing - [%s-%s]' % (name, frequency)))
+    return df
+
+
+@try_exception
+def processCUR(df, frequency='BM', export=False):
+    '''clean/ process currency NAV data according to frquency'''
+    logger.info('Processing currency NAV...')
+    df['date'] = df['date'].astype('datetime64[D]')
+
+    # process
+    name = 'CURRENCY'
+    df['profit_rate'] = df['profit_rate'].apply(lambda x: str(x).strip('%')).fillna(0).astype('float') / 100
+    df['date_m'] = df['date'].apply(lambda x: str(x)[:7])
+    df = df.groupby(['fund_code', 'date_m'], as_index=False)['profit_rate'].mean()
+    df = df.pivot('date_m', 'fund_code', 'profit_rate').fillna(method='ffill')
+    df = (df / 12) if 'M' in frequency else df
+    df = (df / 4) if 'Q' in frequency else df
 
     # cal statistic
     calNAVStat(df, name)

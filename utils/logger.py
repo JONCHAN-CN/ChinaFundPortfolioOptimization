@@ -17,4 +17,6 @@ def init_logger(filename=None, filemode='a', logger_name='main'):
                         )
     logger = logging.getLogger(logger_name)
     logger.addHandler(logging.StreamHandler())
+    if not ('exception' in filename):
+        logger.info('logging in %s' % filename)
     return logger

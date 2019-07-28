@@ -33,3 +33,7 @@ ManagerFile:
   mana_chg_path: './data/1-fund_managers_chg.csv'
   res_mana_chg_path: './data/2-manger_chg.csv'
   res_mana_info_path: './data/2-mana_info.csv'
+
+Backtest:
+  pct: 0.6
+  coe: 0.6

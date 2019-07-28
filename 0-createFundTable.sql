@@ -2,6 +2,7 @@
 --use fund;
 
 
+-- fund info
 DROP TABLE IF  EXISTS fund_info ;
 CREATE TABLE IF NOT EXISTS `fund_info` (
   `fund_code` varchar(255) NOT NULL COMMENT '基金代码',
@@ -34,7 +35,8 @@ CREATE TABLE IF NOT EXISTS `fund_info` (
   PRIMARY KEY (`fund_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金基本信息表';
  
- 
+
+-- manager
 DROP TABLE IF  EXISTS fund_managers_chg; 
 CREATE TABLE IF NOT EXISTS `fund_managers_chg` (
 	`fund_code` varchar(255) NOT NULL COMMENT '基金代码',
@@ -62,6 +64,27 @@ CREATE TABLE IF NOT EXISTS `fund_managers_info` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金经理信息基表'; 
  
  
+ DROP TABLE IF  EXISTS fund_managers_his;
+CREATE TABLE IF NOT EXISTS `fund_managers_his` (
+	`manager_id` varchar(255) NOT NULL COMMENT '基金经理ID',
+	`manager_url` varchar(255) DEFAULT NULL COMMENT '链接',
+	`manager_name` varchar(255) DEFAULT NULL COMMENT '基金经理名称',
+	`cum_on_duty_term` varchar(255) NOT NULL COMMENT '累计任职时间',
+	`fund_code` varchar(255) NOT NULL COMMENT '基金ID',
+	`fund_name` varchar(255) DEFAULT NULL COMMENT '基金名称',
+	`fund_type` varchar(255) DEFAULT NULL COMMENT '基金类型',
+	`fund_scale` varchar(255) DEFAULT NULL COMMENT '基金规模（亿元）',
+	`start_date` varchar(255) NOT NULL COMMENT '起始期',
+	`end_date` varchar(255) DEFAULT NULL COMMENT '止期',
+	`term` varchar(255) DEFAULT NULL COMMENT '任期时长',
+	`return_rate` varchar(255) DEFAULT NULL COMMENT '回报率',	
+	`updated_date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
+	`data_source` varchar(255) DEFAULT 'eastmoney' COMMENT '数据源',
+	PRIMARY KEY (`manager_id`,`fund_code`,`start_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金经理履历表'; 
+
+
+-- nav
 DROP TABLE IF  EXISTS fund_nav ;
 CREATE TABLE IF NOT EXISTS `fund_nav` (
   `date` varchar(255) NOT NULL,
@@ -94,26 +117,6 @@ CREATE TABLE IF NOT EXISTS  `fund_nav_currency` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='货币基金净值表';
 
 
-DROP TABLE IF  EXISTS fund_managers_his;
-CREATE TABLE IF NOT EXISTS `fund_managers_his` (
-	`manager_id` varchar(255) NOT NULL COMMENT '基金经理ID',
-	`manager_url` varchar(255) DEFAULT NULL COMMENT '链接',
-	`manager_name` varchar(255) DEFAULT NULL COMMENT '基金经理名称',
-	`cum_on_duty_term` varchar(255) NOT NULL COMMENT '累计任职时间',
-	`fund_code` varchar(255) NOT NULL COMMENT '基金ID',
-	`fund_name` varchar(255) DEFAULT NULL COMMENT '基金名称',
-	`fund_type` varchar(255) DEFAULT NULL COMMENT '基金类型',
-	`fund_scale` varchar(255) DEFAULT NULL COMMENT '基金规模（亿元）',
-	`start_date` varchar(255) NOT NULL COMMENT '起始期',
-	`end_date` varchar(255) DEFAULT NULL COMMENT '止期',
-	`term` varchar(255) DEFAULT NULL COMMENT '任期时长',
-	`return_rate` varchar(255) DEFAULT NULL COMMENT '回报率',	
-	`updated_date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
-	`data_source` varchar(255) DEFAULT 'eastmoney' COMMENT '数据源',
-	PRIMARY KEY (`manager_id`,`fund_code`,`start_date`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金经理履历表'; 
-
-
 DROP TABLE IF  EXISTS fund_nav_quantity ;
 CREATE TABLE IF NOT EXISTS `fund_nav_quantity` (
   `fund_code` varchar(255) NOT NULL,
@@ -123,6 +126,7 @@ CREATE TABLE IF NOT EXISTS `fund_nav_quantity` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金净值数量表'; 
 
 
+-- model TODO update acct to database.ddl
 CREATE TABLE `fund_portfolio_3` (
   `id` int(15) NOT NULL AUTO_INCREMENT,
   `fundCode_0` varchar(255) NOT NULL,
@@ -134,12 +138,6 @@ CREATE TABLE `fund_portfolio_3` (
   `returns` float NOT NULL,
   `risks` float NOT NULL,
   `sharpeRatio` float NOT NULL,
-   `annual_return_score` float NOT NULL,
-  `cum_on_duty_term_pct` float NOT NULL,
-  `annual_return_fund` float NOT NULL,
-  `term` float NOT NULL,
-  `weighted_annual_return_score` float NOT NULL,
-  `mode` varchar NOT NULL,
   `label` varchar(255) DEFAULT NULL,
   `train_date` datetime NOT NULL,
   `expire_date` datetime DEFAULT NULL,
@@ -157,6 +155,35 @@ CREATE TABLE `fund_backtest_3` (
   PRIMARY KEY (`id`,`backtest_date`),
   CONSTRAINT `fund_backtest_3_ibfk_1` FOREIGN KEY (`id`) REFERENCES `fund_portfolio_3` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金回测表（3位）'
+
+CREATE TABLE `params` (
+  `batchid` int(15) NOT NULL,
+  `risk_free` float NOT NULL,
+  `fit_frequency` varchar(255) NOT NULL,
+  `portfolio_nbr` int(11) NOT NULL,
+  `annual_return_score` float NOT NULL,
+  `cum_on_duty_term_pct` float NOT NULL,
+  `annual_return_fund` float NOT NULL,
+  `term` float NOT NULL,
+  `weighted_annual_return_score` float NOT NULL,
+  `mode` varchar(255) NOT NULL,
+  `date` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '入库时间',
+  `expire_date` datetime DEFAULT NULL,
+  PRIMARY KEY (`batchid`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='参数表'
+
+
+CREATE TABLE `params_benchmark` (
+  `batchid` int(15) NOT NULL,
+  `backtest_date` datetime NOT NULL,
+  `avg_exp_return` float NOT NULL COMMENT '平均非负期望回报',
+  `avg_act_return` float NOT NULL COMMENT '平均非负实际回报',
+  `pct` float NOT NULL COMMENT '实际回报/期望回报',
+  PRIMARY KEY (`batchid`),
+  CONSTRAINT `params_benchmark_ibfk_1` FOREIGN KEY (`batchid`) REFERENCES `params` (`batchid`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='参数有效率表'
+
+
 
 
 -- side to asist

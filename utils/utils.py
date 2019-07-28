@@ -8,7 +8,7 @@ from .decorator import try_exception
 logger = logging.getLogger('main.export')
 
 
-@try_exception()
+@try_exception
 def calNAVStat(table, name):
     '''NAV数据切片统计'''
     # gen stat
@@ -35,7 +35,7 @@ def calNAVStat(table, name):
 
 
 # 导出表格为csv
-@try_exception()
+@try_exception
 def exportTable(tab, name=None, freq=None, index_flag=False):
     if freq is not None:
         tab.to_csv('../out/2-%s-%s.csv' % (name, freq), index=index_flag)

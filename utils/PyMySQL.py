@@ -22,7 +22,7 @@ def _exception(function):
 class PyMySQL:
     def _init_(self, host, user, passwd, db, port, charset):
         pymysql.install_as_MySQLdb()
-        self.conn = pymysql.connect(host=host, user=user, passwd=passwd, db=db, port=3306, charset=charset)
+        self.conn = pymysql.connect(host=host, user=user, passwd=passwd, db=db, port=port, charset=charset)
         self.conn.ping(reconnect=True)  # 使用mysql ping来检查连接,实现超时自动重新连接
         self.conn.autocommit(True)
         self.cur = self.conn.cursor()
@@ -127,10 +127,10 @@ def welcome():
     try:
         sql = input('Input SQL: ')
         if sql.upper() == 'EXIT':
-            mySQL.dispose()
+            engine.dispose()
             exit()
         else:
-            mySQL.sql(sql)
+            engine.sql(sql)
     except:
         logger.info('INVALID INPUT\n')
     welcome()
@@ -143,7 +143,7 @@ if __name__ == "__main__":
     user = getpass.getuser()
     passwd = getpass.getpass(prompt='password: ')
 
-    mySQL = PyMySQL()
-    mySQL._init_(host, user, passwd, db, 3306, 'UTF-8')  # host/user/password/database
+    engine = PyMySQL()
+    engine._init_(host, user, passwd, db, 3306, 'UTF-8')  # host/user/password/database
 
     welcome()

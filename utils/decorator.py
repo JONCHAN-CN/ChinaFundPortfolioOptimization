@@ -9,7 +9,7 @@ def try_exception(function):
     A decorator that wraps the passed in function and logs exceptions should one occur
     https://www.blog.pythonlibrary.org/2016/06/09/python-how-to-create-an-exception-logging-decorator/
     """
-    logger = init_logger('./log/exception.log', 'a', 'exception')
+    exp_logger = init_logger('./log/exception.log', 'a', 'exception')
 
     @wraps(function)
     def wrapper(*args, **kwargs):
@@ -19,7 +19,7 @@ def try_exception(function):
             # log the exception
             err = "There was an exception in  "
             err += function.__name__
-            logger.exception(err)
+            exp_logger.exception(err)
 
             # # re-raise the exception
             # raise
