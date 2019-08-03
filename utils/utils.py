@@ -21,7 +21,7 @@ def calNAVStat(table, name):
         df.loc['fundStat', i] = np.percentile(fundStat, i)
 
     # Create a Pandas Excel writer using XlsxWriter as the engine.
-    writer = pd.ExcelWriter('../out/2-NAV_stat_%s.xlsx' % name, engine='xlsxwriter')
+    writer = pd.ExcelWriter('./data/2-NAV_stat_%s.xlsx' % name, engine='xlsxwriter')
 
     # Convert the dataframe to an XlsxWriter Excel object.
     dateStat.to_excel(writer, sheet_name='dateStat')
@@ -38,9 +38,9 @@ def calNAVStat(table, name):
 @try_exception
 def exportTable(tab, name=None, freq=None, index_flag=False):
     if freq is not None:
-        tab.to_csv('../out/2-%s-%s.csv' % (name, freq), index=index_flag)
+        tab.to_csv('./data/2-%s-%s.csv' % (name, freq), index=index_flag)
     else:
-        tab.to_csv('../out/2-%s.csv' % name, index=index_flag)
+        tab.to_csv('./data/2-%s.csv' % name, index=index_flag)
     logger.info(str('\nEXPORT TABLES %s Succeed!' % name))
 
 

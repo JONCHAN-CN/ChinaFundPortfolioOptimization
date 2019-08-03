@@ -183,14 +183,14 @@ def processManager(mana_his_path, mana_info_path, mana_chg_path, res_mana_chg_pa
 @try_exception
 def processNAV(df, frequency='BM', export=False):
     '''clean/ process NAV data according to frquency'''
-    logger.info('Processing NAV...')
-    df['date'] = df['date'].astype('datetime64[D]')
+    logger.info('processing NAV')
 
     # process
     name = 'NAV'
-    df['nav'] = df['nav'].astype('float')  # TODO how to deal w/ div_rec
-    df = df.pivot('date', 'fund_code', 'nav').fillna(method='ffill').resample(frequency).asfreq()
+    df['date'] = df['date'].astype('datetime64[D]')
+    df['nav'] = pd.to_numeric(df['nav'], errors='coerce')  # TODO how to deal w/ div_rec
 
+    df = df.pivot('date', 'fund_code', 'nav').fillna(method='ffill').resample(frequency).asfreq()
     # cal statistic
     calNAVStat(df, name)
 
@@ -205,7 +205,7 @@ def processNAV(df, frequency='BM', export=False):
 @try_exception
 def processCUR(df, frequency='BM', export=False):
     '''clean/ process currency NAV data according to frquency'''
-    logger.info('Processing currency NAV...')
+    logger.info('processing currency NAV')
     df['date'] = df['date'].astype('datetime64[D]')
 
     # process

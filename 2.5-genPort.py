@@ -40,18 +40,18 @@ def select_train_date(engine):
     train_date = train_date - datetime.timedelta(days=train_date.day)
 
     # retrive latest available nav date
-    _sql = 'select date,count(*) from %s group by date order by date desc limit 10'
-    date_list = pd.read_sql_query(_sql % 'fund_nav', engine)
-    latest_nav_date = 0
-    for i in range(len(date_list)):
-        if date_list.iloc[i]['count(*)'] >= date_list['count(*)'].max() * 0.9:
-            latest_nav_date = dt.strptime(date_list.iloc[i]['date'], '%Y-%m-%d')
-    if latest_nav_date == 0:
-        logger.exception('NO ENOUGH DATA TO GO ON')
-        sys.exit()
+    # _sql = 'select date,count(*) from %s group by date order by date desc limit 10'
+    # date_list = pd.read_sql_query(_sql % 'fund_nav', engine)
+    # latest_nav_date = 0
+    # for i in range(len(date_list)):
+    #     if date_list.iloc[i]['count(*)'] >= date_list['count(*)'].max() * 0.9:
+    #         latest_nav_date = dt.strptime(date_list.iloc[i]['date'], '%Y-%m-%d')
+    # if latest_nav_date == 0:
+    #     logger.exception('NO ENOUGH DATA TO GO ON')
+    #     sys.exit()
 
     # get pratical train date
-    train_date = min(train_date, latest_nav_date)
+    # train_date = min(train_date, latest_nav_date)
     if train_date.weekday() < 5:
         pass
     else:
@@ -162,10 +162,11 @@ def optimalPortfolio(navReturn, nbr, pre, risk_free, fit_frequency):  # harry ma
             'x']  # CALCULATE THE [OPTIMAL PORTFOLIO WEIGHT] with min risk
         op_return = blas.dot(pbar, op_wt)  # return under OPTIMAL PORTFOLIO
         op_risk = np.sqrt(blas.dot(op_wt, S * op_wt))  # risk under OPTIMAL PORTFOLIO
-        port.append(list(op_wt) + [op_return, op_risk])
+        port.append([np.asarray(op_wt), op_return, op_risk])
     return port
 
 
+@time_elapsed
 def calculating_proc(nbr, return_vec, preCor, in_queue, out_queue, lock_in, lock_out, risk_free, fit_frequency):
     ''''multiprocess -> input queue + function + output queue'''
     in_count = 0
@@ -213,27 +214,27 @@ def formating_proc(nbr, train_date, out_queue, risk_free, fit_frequency):
             awake = 0
             for_count = for_count + 1
             col_port = out_queue.get()
-
-            port_ = pd.DataFrame()
-            col = []
-            for n in range(len(col_port[0])):
-                col.append(col_port[0])
-            fund = pd.DataFrame(col).add_prefix('fundCode_')
+            col = col_port[0]
             port = col_port[1]
-            port_name = ['portfolio_%d' % n for n in range(len(port[0]) - 2)] + ['returns', 'risks']
-            port = pd.DataFrame(port, columns=port_name)
-            po_ = pd.concat([fund, port], axis=1)
-            po = pd.concat([po, po_], axis=0, ignore_index=True)
+            port_ = pd.DataFrame()
 
+            # deal w/ result
+            ## fund_code
+            fund = pd.DataFrame(list(col)).T.add_prefix('fundCode_')
+            ## weight, type, others
+            for idx, label in ([0, 'srp'], [1, 'def'], [2, 'min']):
+                wt = pd.DataFrame(data=port[idx][0].T).add_prefix('portfolio_')
+                port_ = pd.concat([port_, pd.DataFrame(pd.concat(
+                    [fund, wt, pd.Series(port[idx][1]), pd.Series(port[idx][2]), pd.Series(label),
+                     pd.Series(str(train_date)[:10])], axis=1))], axis=0, ignore_index=True)
+            ## concat fund code & portfolio
+            po = pd.concat([po, port_], axis=0, ignore_index=True)
             ## verbose
             if for_count % 1000 == 0:
                 logger.info('formatting portfolio %d' % for_count)
 
-    po['label'] = po.index % 3
-    po['label'] = po['label'].replace([0, 1, 2], ['srp', 'def', 'min'])
-    po['train_date'] = str(train_date)[:10]
-
     logger.info('exporting portfolio')
+    po.rename(columns={0: 'returns', 1: 'risks', 2: 'label', 3: 'train_date'}, inplace=True)
 
     # calculate sharpe ratio
     po = sharpeRatio(po, None, risk_free, fit_frequency, False)
@@ -242,17 +243,21 @@ def formating_proc(nbr, train_date, out_queue, risk_free, fit_frequency):
     po = po.round(3)
     po['unique_flag'] = po.apply(lambda x: int(x[0]) * x[3] + int(x[1]) * x[4] + int(x[2]) * x[5], axis=1)
     po = po.iloc[po['unique_flag'].drop_duplicates().index, :-1]
-    logger.info('%d portfolio generated' % po.shape[0])
+    logger.info('%d portfolio generated' % po.shape[1])
 
     # export params
     param = pd.DataFrame({**config['Filter'], **config['Portfolio']}, index=[0])
     param['batchid'] = str(dt.now().strftime('%Y%m%d%H'))
-    param.to_sql(name='params', con=engine, if_exists='append', index=False)
+    pk.dump(param, open('./data/param_%s.dat' % train_date, 'wb'), True)
+    # param = pk.load(open('./data/param_%s.dat' % train_date, 'rb'))
+    # param.to_sql(name='params', con=engine, if_exists='append', index=False)
 
     # export portfolio to disk & database
     po['batchid'] = str(dt.now().strftime('%Y%m%d%H'))
     po.to_csv('./data/3-portfolio_%d_%s.csv' % (nbr, str(dt.now().strftime('%Y%m%d'))), index=False)
-    po.to_sql(name='fund_portfolio_3', con=engine, if_exists='append', index=False)
+    pk.dump(po, open('./data/po_%s.dat' % train_date, 'wb'), True)
+    # po = pk.load(open('./data/po_%s.dat' % train_date, 'rb'))
+    # po.to_sql(name='fund_portfolio_3', con=engine, if_exists='append', index=False)
 
 
 @time_elapsed
@@ -292,17 +297,21 @@ def filterManager(mana_info, mana_chg, annual_return_score=0.075, cum_on_duty_te
     term_pct = mana_info[mana_info['cum_on_duty_term_pct'] >= cum_on_duty_term_pct][['manager_name', 'manager_id']]
 
     # apply filter of manager based on manager
-    _lbd = lambda x: 1 if (str(x['manager_id']) in list(return_score['manager_id'])) else 0
-    mana_chg['return_score'] = mana_chg.apply(_lbd, axis=1)
-    _lbd = lambda x: 1 if (str(x['manager_id']) in list(term_pct['manager_id'])) else 0
-    mana_chg['term_pct'] = mana_chg.apply(_lbd, axis=1)
+    mana_chg['return_score'] = mana_chg.apply(
+        lambda x: 1 if (str(x['manager_id']) in list(return_score['manager_id'])) else 0, axis=1)
+    # mana_chg.loc[mana_chg['manager_id'] == 0, 'return_score'] = mana_chg[mana_chg['manager_id'] == 0].apply(
+    #     lambda x: 1 if (x['single_manager'] in list(return_score['manager_name'])) else 0, axis=1)
+    mana_chg['term_pct'] = mana_chg.apply(lambda x: 1 if (str(x['manager_id']) in list(term_pct['manager_id'])) else 0,
+                                          axis=1)
+    # mana_chg.loc[mana_chg['manager_id'] == 0, 'term_pct'] = mana_chg[mana_chg['manager_id'] == 0].apply(
+    #     lambda x: 1 if (x['single_manager'] in list(term_pct['manager_name'])) else 0, axis=1)
 
     # apply filter of manager based on fund
-    _lbd = lambda x: 1 if float(x['annual_return_fund']) >= annual_return_fund else 0
-    mana_chg['return_rate'] = mana_chg.apply(_lbd, axis=1)
+    mana_chg['return_rate'] = mana_chg.apply(lambda x: 1 if float(x['annual_return_fund']) >= annual_return_fund else 0,
+                                             axis=1)
     mana_chg['term'] = mana_chg.apply(lambda x: 1 if float(x['term']) >= term else 0, axis=1)
-    _lbd = lambda x: 1 if float(x['weighted_annual_return_score']) >= weighted_annual_return_score else 0
-    mana_chg['weighted'] = mana_chg.apply(_lbd, axis=1)
+    mana_chg['weighted'] = mana_chg.apply(
+        lambda x: 1 if float(x['weighted_annual_return_score']) >= weighted_annual_return_score else 0, axis=1)
 
     # log filter application
     for i in list(['return_score', 'term_pct', 'return_rate', 'term', 'weighted']):
@@ -312,12 +321,11 @@ def filterManager(mana_info, mana_chg, annual_return_score=0.075, cum_on_duty_te
     # generate fund list
     fund_list = pd.DataFrame()
     if mode == 'loose':
-        con_1 = (mana_chg[['return_score', 'term_pct', 'return_rate', 'term']].sum(axis=1) >= 4)
-        con_2 = (mana_chg[['term_pct', 'return_rate', 'term', 'weighted']].sum(axis=1) >= 4)
-        fund_list = mana_chg[con_1 | con_2]
+        fund_list = mana_chg[(mana_chg[['return_score', 'term_pct', 'return_rate', 'term']].sum(axis=1) >= 4) | (
+                mana_chg[['term_pct', 'return_rate', 'term', 'weighted']].sum(axis=1) >= 4)]
     elif mode == 'strict':
-        con_3 = (mana_chg[['return_score', 'term_pct', 'return_rate', 'term', 'weighted']].sum(axis=1) >= 5)
-        fund_list = mana_chg.loc[con_3]
+        fund_list = mana_chg.loc[
+            mana_chg[['return_score', 'term_pct', 'return_rate', 'term', 'weighted']].sum(axis=1) >= 5]
     else:
         return 1
 
@@ -365,11 +373,10 @@ def main():
         # manager filter list
         fund_list = filterManager(mana_info, p_chg, **filter)  # fund list after filtering managers
         nav_model = nav[list(fund_list)]
+        nav_model = nav_model.T.drop_duplicates().T
 
         # dump
-        nav_model = nav_model.T.drop_duplicates().T
         pk.dump(nav_model, open(nav_file['res_path'] % train_date, 'wb'), True)
-    # nav_model = nav_model.iloc[:,:10]
 
     # gen precise corvariance
     preCor = preciseCorvariance(nav_model, ytg)

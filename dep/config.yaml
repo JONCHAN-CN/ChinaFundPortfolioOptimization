@@ -8,24 +8,24 @@ MySQL:
 
 
 Portfolio:
-  risk_free: 0.035
+  risk_free: 0.025
   fit_frequency: BM
   portfolio_nbr: [3]
-
+  years_to_go: 5
 
 Filter:
-  annual_return_score: 0.065
+  annual_return_score: 0.055
   cum_on_duty_term_pct: 0.60
-  annual_return_fund: 0.06
-  term: 1.5
-  weighted_annual_return_score: 0.05
+  annual_return_fund: 0.055
+  term: 1.25
+  weighted_annual_return_score: 0.045
   mode: strict
 
 
 NAVFile:
   nav_path: './data/1-fund_nav.csv'
   cur_path: './data/1-fund_nav_currency.csv'
-  res_path: './data/processed_nav.dat'
+  res_path: './data/processed_nav_%s.dat'
 
 ManagerFile:
   mana_his_path: './data/1-fund_managers_his.csv'
