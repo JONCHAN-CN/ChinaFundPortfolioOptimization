@@ -29,8 +29,11 @@ class PyMySQL:
         logger.info("\nMySQL Connect Success - %s@%s:%s/%s" % (user, host, port, db))
 
     @_exception
-    def sql(self, sql):  # not necessary
-        nrows = self.cur.execute(sql)  # return rows affected
+    def sql(self, sql, args=''):  # not necessary
+        if args == '':
+            nrows = self.cur.execute(sql)  # return rows affected
+        else:
+            nrows = self.cur.execute(sql, args)  # return rows affected
         if 'select' in sql:
             data = self.cur.fetchall()
             dict = []

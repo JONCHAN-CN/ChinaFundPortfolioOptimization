@@ -52,8 +52,8 @@ CREATE TABLE IF NOT EXISTS `fund_managers_chg` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金经理变动一览表';
  
  
-DROP TABLE IF  EXISTS fund_managers_info;
-CREATE TABLE IF NOT EXISTS `fund_managers_info` (
+DROP TABLE IF  EXISTS managers_info;
+CREATE TABLE IF NOT EXISTS `managers_info` (
 	`manager_id` varchar(255) NOT NULL COMMENT '基金经理ID',
 	`url` varchar(255) DEFAULT NULL COMMENT '链接',
 	`manager_name` varchar(255) DEFAULT NULL COMMENT '基金经理',
@@ -64,8 +64,8 @@ CREATE TABLE IF NOT EXISTS `fund_managers_info` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='基金经理信息基表'; 
  
  
- DROP TABLE IF  EXISTS fund_managers_his;
-CREATE TABLE IF NOT EXISTS `fund_managers_his` (
+ DROP TABLE IF  EXISTS managers_his;
+CREATE TABLE IF NOT EXISTS `managers_his` (
 	`manager_id` varchar(255) NOT NULL COMMENT '基金经理ID',
 	`manager_url` varchar(255) DEFAULT NULL COMMENT '链接',
 	`manager_name` varchar(255) DEFAULT NULL COMMENT '基金经理名称',
@@ -85,8 +85,8 @@ CREATE TABLE IF NOT EXISTS `fund_managers_his` (
 
 
 -- nav
-DROP TABLE IF  EXISTS fund_nav ;
-CREATE TABLE IF NOT EXISTS `fund_nav` (
+DROP TABLE IF  EXISTS nav ;
+CREATE TABLE IF NOT EXISTS `nav` (
   `date` varchar(255) NOT NULL,
   `nav` varchar(255) DEFAULT NULL,
   `add_nav` varchar(255) DEFAULT NULL,
@@ -101,8 +101,8 @@ CREATE TABLE IF NOT EXISTS `fund_nav` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='非货币基金净值表';
  
  
-DROP TABLE IF  EXISTS fund_nav_currency ;
-CREATE TABLE IF NOT EXISTS  `fund_nav_currency` (
+DROP TABLE IF  EXISTS nav_currency ;
+CREATE TABLE IF NOT EXISTS  `nav_currency` (
   `date` varchar(255) NOT NULL,
   `fund_code` varchar(255) NOT NULL,
   `profit_per_units` varchar(255) DEFAULT NULL,
@@ -117,8 +117,8 @@ CREATE TABLE IF NOT EXISTS  `fund_nav_currency` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='货币基金净值表';
 
 
-DROP TABLE IF  EXISTS fund_nav_quantity ;
-CREATE TABLE IF NOT EXISTS `fund_nav_quantity` (
+DROP TABLE IF  EXISTS nav_quantity ;
+CREATE TABLE IF NOT EXISTS `nav_quantity` (
   `fund_code` varchar(255) NOT NULL,
   `quantity` varchar(255) DEFAULT NULL,
   `updated_date` datetime DEFAULT NULL,
@@ -186,25 +186,14 @@ CREATE TABLE `params_benchmark` (
 
 
 
+
 -- side to asist
-replace into fund_nav select * from fund_nav_slave;
-replace into fund_nav_currency select * from fund_nav_currency_slave;
-
-truncate table fund_nav_currency_slave;
-truncate table fund_nav_slave;
-
-select fund_code,count(*) from fund_nav_slave group by fund_code;
-select * from fund_nav_slave;
-select count(*) from fund_nav_slave where fund_code =501053;
-
-select fund_code,count(*) from fund_nav_currency_slave group by fund_code;
-select * from fund_nav_currency_slave;
-
-
-
-select fund_code,count(*) from fund_nav group by fund_code;
-select count(*) from fund_nav where fund_code =671030;
-select * from fund_nav where fund_code =005784;
+replace into nav select * from nav_slave;
+replace into nav_currency select * from nav_currency_slave;truncate table nav_currency_slave;truncate table nav_slave;
+select fund_code, count(*)from nav_slave group by fund_code;select * from nav_slave;select count(*)from nav_slave where
+fund_code = 501053;select fund_code, count(*)from nav_currency_slave group by fund_code;select * from nav_currency_slave
+;select fund_code, count(*)from nav group by fund_code;select count(*)from nav where fund_code = 671030;select * from
+nav where fund_code = 005784;
 
 select * from fund_info where fund_type ='货币型';
 
@@ -214,6 +203,6 @@ show global variables like '%packet%';
 set global net_read_timeout =256*1024*1024;
 
 SELECT *
-FROM fund.fund_nav
+FROM fund.nav
 where nav != add_nav
 and fund_code = 202001;

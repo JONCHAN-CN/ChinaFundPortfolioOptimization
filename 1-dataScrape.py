@@ -1,14 +1,15 @@
 # -*- coding:utf-8 -*-
-'''
+"""
 原PO: https://blog.csdn.net/yuzhucu/article/details/55261024
 原作：yuzhucu
 功能：抓取东方财富网上基金相关数据
 
 @author: JON7390
 交易一期(基金)数据
-'''
+"""
+
+import os
 import queue
-import random
 import socket
 import sys
 import threading
@@ -20,102 +21,88 @@ import requests
 import urllib3
 import yaml
 from bs4 import BeautifulSoup
+from fake_useragent import UserAgent
 
-from utils import PyMySQL, logger
+from utils import PyMySQL, logger, utils
+from utils.utils import exportQuery
 
 logger = logger.init_logger('./log/1-scrapeData_%s.log' % dt.now().strftime('%Y-%m-%d'))
-cfp = yaml.load(open('./dep/config.yaml', 'r'))
+cfp = yaml.load(open('./config.yaml', 'r'))
+fund_file_path = "./dep/1-fundCode&Name.csv"
 db = [*cfp['MySQL'].values()]  # unpack dict to get dict value
 
 
-def randHeader():
-    '''随机生成User-Agent'''
-    head_connection = ['Keep-Alive', 'close']
-    head_accept = ['text/html, application/xhtml+xml, */*']
-    head_accept_language = ['zh-CN,fr-FR;q=0.5', 'en-US,en;q=0.8,zh-Hans-CN;q=0.5,zh-Hans;q=0.3']
-    head_user_agent = ['Opera/8.0 (Macintosh; PPC Mac OS X; U; en)',
-                       'Opera/9.27 (Windows NT 5.2; U; zh-cn)',
-                       'Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.1; Win64; x64; Trident/4.0)',
-                       'Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.1; Trident/4.0)',
-                       'Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.1; WOW64; Trident/6.0; SLCC2; .NET CLR 2.0.50727; .NET CLR 3.5.30729; .NET CLR 3.0.30729; Media Center PC 6.0; InfoPath.2; .NET4.0C; .NET4.0E)',
-                       'Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.1; WOW64; Trident/6.0; SLCC2; .NET CLR 2.0.50727; .NET CLR 3.5.30729; .NET CLR 3.0.30729; Media Center PC 6.0; InfoPath.2; .NET4.0C; .NET4.0E; QQBrowser/7.3.9825.400)',
-                       'Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.1; WOW64; Trident/6.0; BIDUBrowser 2.x)',
-                       'Mozilla/5.0 (Windows; U; Windows NT 5.1) Gecko/20070309 Firefox/2.0.0.3',
-                       'Mozilla/5.0 (Windows; U; Windows NT 5.1) Gecko/20070803 Firefox/1.5.0.12',
-                       'Mozilla/5.0 (Windows; U; Windows NT 5.2) Gecko/2008070208 Firefox/3.0.1',
-                       'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.8.1.12) Gecko/20080219 Firefox/2.0.0.12 Navigator/9.0.0.6',
-                       'Mozilla/5.0 (Windows NT 5.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/28.0.1500.95 Safari/537.36',
-                       'Mozilla/5.0 (Windows NT 6.1; WOW64; Trident/7.0; SLCC2; .NET CLR 2.0.50727; .NET CLR 3.5.30729; .NET CLR 3.0.30729; Media Center PC 6.0; .NET4.0C; rv:11.0) like Gecko)',
-                       'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:21.0) Gecko/20100101 Firefox/21.0 ',
-                       'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.1 (KHTML, like Gecko) Maxthon/4.0.6.2000 Chrome/26.0.1410.43 Safari/537.1 ',
-                       'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.1 (KHTML, like Gecko) Chrome/21.0.1180.92 Safari/537.1 LBBROWSER',
-                       'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.75 Safari/537.36',
-                       'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/536.11 (KHTML, like Gecko) Chrome/20.0.1132.11 TaoBrowser/3.0 Safari/536.11',
-                       'Mozilla/5.0 (Windows NT 6.3; WOW64; Trident/7.0; rv:11.0) like Gecko',
-                       'Mozilla/5.0 (Macintosh; PPC Mac OS X; U; en) Opera 8.0'
-                       ]
-    result = {
-        'Connection': head_connection[0],
-        'Accept': head_accept[0],
-        'Accept-Language': head_accept_language[1],
-        'User-Agent': head_user_agent[random.randrange(0, len(head_user_agent))]
-    }
-    return result
-
-
-def getURL(url, tries_num=5, sleep_time=5, time_out=10, max_retry=10):
-    '''
-        这里重写get函数，主要是为了实现网络中断后自动重连，同时为了兼容各种网站不同的反爬策略及，通过sleep时间和timeout动态调整来测试合适的网络连接参数；
-        通过isproxy 来控制是否使用代理，以支持一些在内网办公的同学
-        :param url:
-        :param tries_num:  重试次数
-        :param sleep_time: 休眠时间
-        :param time_out: 连接超时参数
-        :param max_retry: 最大重试次数，递归时使用
-        :return: response
-        '''
-    sleep_time_p = sleep_time
-    time_out_p = time_out
-    tries_num_p = tries_num
-    isproxy = 0  # 如需要使用代理，改为1，并设置代理IP参数 proxy
-    proxy = {"http": "http://110.37.84.147:8080", "https": "http://110.37.84.147:8080"}  # 这里需要替换成可用的代理IP
-
-    try:
-        # res = requests.Session()
-        if isproxy == 1:
-            res = requests.get(url, headers=randHeader(), timeout=time_out, proxies=proxy)
-        else:
-            res = requests.get(url, headers=randHeader(), timeout=time_out)
-        # res.raise_for_status()  # 如果响应状态码不是 200，就主动抛出异常
-        return res
-    except (socket.timeout or urllib3.exceptions.ReadTimeoutError or requests.exceptions.ReadTimeout)as e:
-        # 设置重试次数，最大timeout 时间和 最长休眠时间
-        sleep_time_p = sleep_time_p + 5
-        time_out_p = time_out_p + 5
-        tries_num_p = tries_num_p - 1
-        if tries_num_p > 0:
-            time.sleep(sleep_time_p)
-            logger.exception(str(url + ' - ' + str(max_retry - tries_num_p) + ' tries connection.'))
-            return getURL(url, tries_num_p, sleep_time_p, time_out_p, max_retry)
-        else:
-            logger.exception(str(url + ' - error after ' + str(max_retry - tries_num_p) + ' tries connection.'))
-            return 1
-
-
 class FundSpiders():
-
     def getCurrentTime(self):
-        '''获取当前时间'''
+        """获取当前时间"""
         return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
 
-    def getFundCodesFromCsv(self):  # 从csv文件中获取基金代码清单（可从wind或者其他财经网站导出）
-        # file_path = "./dep/TMP.csv"
-        file_path = "./dep/1-fundCode&Name.csv"
-        fund_code = pd.read_csv(file_path, dtype=str)
+    def updateFundCodesFromCsv(self):
+        # get all possible code
+        allCode = []
+        for i in range(0, 1000000):
+            len_ = len(str(i))
+            fund_code = '%s%d' % ('0' * (6 - len_), i)
+            allCode.append(fund_code)
+        # cv with exisisting code
+        existedCode = list(pd.DataFrame(mySQL.selectDistinct('fund_info'))['fund_code'])
+        leftCode = set(allCode).difference(set(existedCode))
+        # cv with done and not fund code
+        with open("./dep/0-doneFundCode.txt", 'r') as f:
+            doneCode = f.readlines()
+        doneCode = list(map(str.strip, doneCode))
+        leftCode = leftCode.difference(set(doneCode))
+        # get new code with MP
+        start = time.time()
+        fund_count = len(list(leftCode))
+        logger.info(f'Start update fund code list from {fund_count} codes')
+        # create process queue ->fund_code/ func/ arg/ max retry time
+        [inQueue.put([i]) for i in list(leftCode)]
+        threads = [baseThread(processWorker_simple) for _ in range(8)]  # create process thread
+        threads.append(baseThread(IOWorker_simple))  # create IO thread
+        [thread.start() for thread in threads[:-1]]  # start process thread
+        time.sleep(30)
+        threads[-1].start()  # start IO thread
+        [thread.join() for thread in threads]  # wait until all process finishes tasks
+        logger.info('Time used multithreading scraping Fund Info: %s' % str(time.time() - start))
+        # 　update code list
+        _sql = 'DELETE FROM fund.fund_info where fund_name = \'---\' or fund_name is NULL;'
+        mySQL.sql(_sql)
+        all = pd.DataFrame(mySQL.selectDistinct('fund_info'))[['fund_code', 'fund_name']]
+        all.to_csv("./dep/1-fundCode&Name.csv", index=False)
+
+    def cleanFundCodesFromCsv(self, fund_file_path):
+        log_files = utils.listAllFiles("./log")
+        latest_log = ""
+        latest_time = 0
+        for f in log_files:
+            if "1-scrapeData" in f:
+                t = os.path.getctime(f)
+                if t > latest_time:
+                    latest_time = t
+                    latest_log = f
+
+        expired_codes = []
+        with open(latest_log, "r") as f:
+            for l in f.readlines():
+                if "共0/0行" in l:
+                    expired_codes.append(l.split("[")[-1].split("]")[0])
+
+        fund_code = pd.read_csv(fund_file_path, dtype=str)
+        fund_code['expire'] = fund_code.apply(lambda x: 1 if x['fund_code'] in expired_codes else 0, axis=1)
+        fund_code = fund_code[fund_code['expire'] == 0].drop(labels=['expire'], axis=1)
+
+        fund_code.to_csv(fund_file_path, index=False)
+
+        logger.info(f'{len(expired_codes)} fund codes expired, {fund_code.shape[0]} left')
+
+    def getFundCodesFromCsv(self, fund_file_path):
+        """从csv文件中获取基金代码清单（可从wind或者其他财经网站导出）"""
+        fund_code = pd.read_csv(fund_file_path, dtype=str)
         return fund_code.fund_code
 
-    def getFundInfo(self, fund_code, mode='default'):
-        '''获取基金概况基本信息'''
+    def getFundInfo(self, fund_code, multi=False):
+        """获取基金概况基本信息"""
         global count, fund_count
         count = count + 1
         logger.info("Processing [%d/%d] Funds" % (count, fund_count))
@@ -126,18 +113,23 @@ class FundSpiders():
         soup = BeautifulSoup(res.text, 'html.parser')
         result = {}
 
+        # parse
         try:
-            # 之前用select、find 比较多，但是一些网页中经常出现部分字段不全导致内容和数据库不匹配的情况导致数据错位。
-            # 这里改为用使用标题的next_element 来获取数据值来规避此问题。其中也有个别字段有问题的，特殊处理下即可
             result['fund_code'] = fund_code
             result['fund_name'] = soup.find_all(text=u"基金全称")[0].next_element.text.strip()
+            if result['fund_name'] == "---" or result['fund_name'] == "":
+                logger.warning("无效基金代码-[%s] " % fund_code)
+                if multi:
+                    lock.acquire()
+                    outQueue.put(['txt', fund_code])
+                    lock.release()
+                return result
             result['fund_abbr_name'] = soup.find_all(text=u"基金简称")[0].next_element.text.strip()
             result['fund_type'] = soup.find_all(text=u"基金类型")[0].next_element.text.strip()
             result['issue_date'] = soup.find_all(text=u"发行日期")[0].next_element.text.strip()
             result['establish_date'] = soup.find_all(text=u"成立日期/规模")[0].next_element.text.split(u'/')[0].strip()
             result['establish_scale'] = soup.find_all(text=u"成立日期/规模")[0].next_element.text.split(u'/')[-1].strip()
             result['asset_value'] = soup.find_all(text=u"资产规模")[0].next_element.text.split(u'（')[0].strip()
-
             if result['asset_value'] != "---":
                 result['asset_value_date'] = \
                     soup.find_all(text=u"资产规模")[0].next_element.text.split(u'（')[1].split(u'）')[0].strip(u'截止至：')
@@ -149,7 +141,6 @@ class FundSpiders():
                     u'（截止至：）')
             else:
                 result['units_date'] = result['units']
-
             result['fund_manager'] = soup.find_all(text=u"基金管理人")[0].next_element.text.strip()
             result['fund_trustee'] = soup.find_all(text=u"基金托管人")[0].next_element.text.strip()
             result['funder'] = soup.find_all(text=u"基金经理人")[0].next_element.text.strip()
@@ -162,17 +153,23 @@ class FundSpiders():
             result['benchmark'] = soup.find_all(text=u"业绩比较基准")[0].next_element.text.strip(u'该基金暂未披露业绩比较基准')
             result['underlying'] = soup.find_all(text=u"跟踪标的")[0].next_element.text.strip(u'该基金无跟踪标的')
         except Exception as e:
-            logger.exception(str("爬取失败: [" + fund_code + "] " + fund_url + " %s" % e))
+            logger.exception(str("爬取失败: [%s] " % fund_code + fund_url + " %s" % e))
 
-        try:
-            mySQL.insertData('fund_info', result)
-            logger.info(str([''.join(i) for i in result[:6]]))
-        except Exception as e:
-            logger.exception(str("入库失败: [" + fund_code + "] " + fund_url + " %s" % e))
+        # import
+        if multi:
+            lock.acquire()
+            outQueue.put(['fund_info', result])
+            lock.release()
+        else:
+            try:
+                mySQL.insertData('fund_info', result)
+                logger.info("新增基金代码-[%s]-%s" % (result['fund_code'], result['fund_name']))
+            except Exception as e:
+                logger.exception(str("入库失败: [%s] " % fund_code + fund_url + " %s" % e))
         return result
 
     def getFundManagers(self, fund_code):
-        '''获取基金经理基本数据 - 基金经理变动一览表/ 基金经理信息基表'''
+        """获取基金经理基本数据 - 基金经理变动一览表/ 基金经理信息基表"""
         global count, fund_count
         count = count + 1
         logger.info("Processing [%d/%d] Fund Managers" % (count, fund_count))
@@ -221,15 +218,15 @@ class FundSpiders():
                             logger.exception(str("爬取失败(based on person): [%s] - %s - %s - %s\n%s" % (
                                 fund_code, manager['manager_name'], manager['url'], fund_url, e)))
                         try:
-                            mySQL.insertData('fund_managers_info', manager)
+                            mySQL.insertData('managers_info', manager)
                         except Exception as e:
                             logger.exception(str("入库失败(based on person): [%s] - %s - %s - %s\n%s" % (
                                 fund_code, manager['manager_name'], manager['url'], fund_url, e)))
         return result
 
     def getFundManagersHistory(self):
-        '''获取基金经理履历数据 - 基金经理履历数据'''
-        manaList = pd.DataFrame(mySQL.selectDistinct('fund_managers_info'))
+        """获取基金经理履历数据 - 基金经理履历数据"""
+        manaList = pd.DataFrame(mySQL.selectDistinct('managers_info'))
         manaList = manaList[['manager_id', 'url', 'manager_name']].drop_duplicates()
         mana_count = len(manaList)
         for i in range(mana_count):
@@ -269,45 +266,49 @@ class FundSpiders():
                         except Exception as e:
                             logger.exception(str("爬取失败(based on manager): [%s] - %s\n%s" % (mana_id, mana_url, e)))
                         try:
-                            mySQL.insertData('fund_managers_his', manager_his)
+                            mySQL.insertData('managers_his', manager_his)
                         except Exception as e:
                             logger.exception(str("入库失败(based on manager): [%s] - %s\n%s" % (mana_id, mana_url, e)))
             else:
                 logger.info("页面无法打开： " + mana_id + " " + mana_url + " " + mana_name)
 
-    # 获取基金净值数据
     def getFundNav(self, fund_code, update=False, silent=False, multi=False):
-        global count, pgs
+        # 获取基金净值数据
+        # init
+        global count
         count = count + 1
-        logger.info("Processing [%d/%d] Funds - NAV [" % (count, fund_count) + fund_code + "]")
+        logger.info(f"Processing [%d/%d] Funds - NAV [%s]" % (count, fund_count, fund_code))
 
+        per_pg = 49
         # http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=000001&page=1&per=49
-        fund_url = 'http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=' + fund_code + '&page=1&per=49'
+        fund_url = f'http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=%s&page=1&per=%d' % (
+            fund_code, per_pg)
         pages = 0
-        records = 0
+        records = -1
 
-        # 获取历史净值的总记录数与页数
-        # 获取单个基金的第一页数据，里面返回的apidata 接口中包含了记录数、分页及数据文件等
-        # 这里暂按照字符串解析方式获取，既然是标准API接口，应该可以通过更高效的方式批量获取全部净值数据，待后续研究。
-        # 首次初始化完成后，如果后续每天更新或者定期更新，只要修改下每页返回的记录参数即可
+        # get total rec count
         try:
             res = getURL(fund_url)
             records = (res.text.strip('var apidata=').strip('{;}').split(',')[1].strip('records:'))
             pages = (res.text.strip('var apidata=').strip('{;}').split(',')[2].strip('pages:'))
         except  Exception as e:
-            logger.exception(str("爬取记录总数失败: [" + fund_code + "] " + fund_url + " %s" % e))
+            logger.exception(f"爬取记录总数失败: [%s] %s \n%s" % (fund_code, fund_url, e))
 
-        # 如增量更新，取98个交易日数据
+        # set pages to scrape
         if not update:
             pages = int(pages)
         else:
-            pages = (pgs // 49) + 1
+            if req_rec >= per_pg:
+                pages = (req_rec // per_pg) + 1
+            else:
+                pages = 1
+                per_pg = req_rec
 
-        # 根据基金代码和总记录数，分页返回所有历史净值
+        # get fund nav by pages
         i = 0  # 基金总record数
         for pg in range(1, pages + 1):
-            fund_nav = 'http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=' + fund_code + '&page=' + str(
-                pg) + '&per=49'
+            fund_nav = 'http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=%s&page=%d&per=%d' % (
+                fund_code, pg, per_pg)
             res = getURL(fund_nav)
             soup = BeautifulSoup(res.text, 'html.parser')
             tables = soup.findAll('table')
@@ -335,10 +336,10 @@ class FundSpiders():
 
                         if multi:
                             lock.acquire()
-                            outQueue.put(['fund_nav', result])
+                            outQueue.put(['nav', result])
                             lock.release()
                         else:
-                            mySQL.insertData('fund_nav', result)
+                            mySQL.insertData('nav', result)
 
                         if silent:
                             pass
@@ -366,10 +367,10 @@ class FundSpiders():
 
                         if multi:
                             lock.acquire()
-                            outQueue.put(['fund_nav_currency', result])
+                            outQueue.put(['nav_currency', result])
                             lock.release()
                         else:
-                            mySQL.insertData('fund_nav_currency', result)
+                            mySQL.insertData('nav_currency', result)
 
                         if silent:
                             pass
@@ -383,67 +384,96 @@ class FundSpiders():
                     pass
         logger.info(str("[" + fund_code + "] " + '共' + str(i) + '/' + str(records) + '行'))
 
-    # 获取历史净值的总记录数(net) - multiply thread mode only
-    def getNavQuan(self, fund_code):
-        global count, fund_count
-        count = count + 1
-        logger.info("Processing [%d/%d] Funds - NAV quantity [" % (count, fund_count) + fund_code + "]")
-        count = 0 if (fund_count == count) else count
-
-        # http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=000001&page=1&per=1
-        fund_url = 'http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=' + fund_code + '&page=1&per=1'
+        # get fund nav quantity
         result = {}
         result['fund_code'] = fund_code
         result['updated_date'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
-
-        try:
-            res = getURL(fund_url)
-            result['quantity'] = (res.text.strip('var apidata=').strip('{;}').split(',')[1].strip('records:'))
-        except  Exception:
-            logger.exception(str("爬取记录总数失败: [" + fund_code + "] " + fund_url))
-            result['quantity'] = -1
+        result['quantity'] = records
 
         lock.acquire()
-        outQueue.put(['fund_nav_quantity', result])
+        outQueue.put(['nav_quantity', result])
         lock.release()
 
 
-# 检查净值数据数量
-def checkNAV():
+def randHeader():
+    """随机生成User-Agent"""
+    head_connection = ['Keep-Alive', 'close']
+    head_accept = ['text/html, application/xhtml+xml, */*']
+    head_accept_language = ['zh-CN,fr-FR;q=0.5', 'en-US,en;q=0.8,zh-Hans-CN;q=0.5,zh-Hans;q=0.3']
+    ua = {
+        'Connection': head_connection[0],
+        'Accept': head_accept[0],
+        'Accept-Language': head_accept_language[1],
+        'User-Agent': UserAgent().Chrome
+    }
+    return ua
+
+
+def getURL(url, tries_num=3, sleep_time=7, time_out=3, max_retry=5):
+    """
+        这里重写get函数，主要是为了实现网络中断后自动重连，同时为了兼容各种网站不同的反爬策略及，通过sleep时间和timeout动态调整来测试合适的网络连接参数；
+        通过isproxy 来控制是否使用代理，以支持一些在内网办公的同学
+        :param url:
+        :param tries_num:  重试次数
+        :param sleep_time: 休眠时间
+        :param time_out: 连接超时参数
+        :param max_retry: 最大重试次数，递归时使用
+        :return: response9
+        """
+    sleep_time_p = sleep_time
+    time_out_p = time_out
+    tries_num_p = tries_num
+    isproxy = 0  # 如需要使用代理，改为1，并设置代理IP参数 proxy
+    proxy = {"http": "http://110.37.84.147:8080", "https": "http://110.37.84.147:8080"}  # 这里需要替换成可用的代理IP
+
     try:
-        end = time.time()
-        fundsCheck = mySQL.selectDistinct('fund_nav_quantity')
-        sql_1, sql_2 = "select distinct fund_code, count(*) from (select distinct * from ", ") t group by fund_code"
-        df_nav = mySQL.sql(sql_1 + 'fund_nav' + sql_2)  # from DB
-        df_cur = mySQL.sql(sql_1 + 'fund_nav_currency' + sql_2)  # from DB
+        if isproxy == 1:
+            res = requests.get(url, headers=randHeader(), timeout=time_out, proxies=proxy)
+        else:
+            res = requests.get(url, headers=randHeader(), timeout=time_out)
+        return res
+    except (socket.timeout or urllib3.exceptions.ReadTimeoutError or requests.exceptions.ReadTimeout)as e:
+        # 设置重试次数，最大timeout 时间和 最长休眠时间
+        sleep_time_p = sleep_time_p + 3
+        time_out_p = time_out_p + 3
+        tries_num_p = tries_num_p - 1
+        if tries_num_p > 0:
+            time.sleep(sleep_time_p)
+            logger.exception(f'%s - %d tries connection.' % (url, max_retry - tries_num_p))
+            return getURL(url, tries_num_p, sleep_time_p, time_out_p, max_retry)
+        else:
+            logger.exception(f'%s - error after %d tries connection.' % (url, max_retry - tries_num_p))
+            return 1
+
+
+# 检查净值数据数量
+def checkNAV():  # TODO
+    try:
+        start = time.time()
+        fundsCheck = mySQL.selectDistinct('nav_quantity')
+        sql = f"select distinct fund_code, count(*) from (select distinct * from %s) t group by fund_code"
+        df_nav = mySQL.sql(sql % 'nav')  # from DB
+        df_cur = mySQL.sql(sql % 'nav_currency')  # from DB
         df_nav = pd.concat([df_nav, df_cur], axis=0)
         fundsCheck = pd.merge(fundsCheck, df_nav, how='left', on=['fund_code'])
-        start = time.time()
-        logger.info("Time used to query NAV quantity from DB: " + str(start - end))
-
-        fundsCheck[['count(*)', 'quantity']] = fundsCheck[['count(*)', 'quantity']].apply(pd.to_numeric)
+        end = time.time()
+        logger.info(f"Time used to query NAV quantity from DB: %d " % ((end - start) / 60))
 
         def divide(x):
             try:
                 res = x['count(*)'] / x['quantity']
             except ZeroDivisionError:
-                res = -1
+                res = 999
             return res
 
+        fundsCheck[['quantity']] = fundsCheck[['quantity']].apply(pd.to_numeric)
         fundsCheck['pct'] = fundsCheck.apply(divide, axis=1)
         fundsCheck['diff'] = fundsCheck.apply(lambda x: x['quantity'] - x['count(*)'], axis=1)
-        fundsCheck.to_csv('./data/1-fund_check.csv', index=False)
+        fundsCheck.to_csv('./data/5-fund_check.csv', index=False)
+        return fundsCheck
     except Exception as e:
         logger.exception(str('NAV QUANTITY CHECK FAIL: ' + " %s" % e))
-
-
-# 导出表格为csv
-def exportTable(tab):
-    try:
-        pd.DataFrame(mySQL.selectDistinct(tab)).to_csv('./data/1-%s.csv' % tab, index=False)
-        logger.info(str('EXPORT TABLES %s Succeed!' % tab))
-    except Exception as e:
-        logger.exception(str('EXPORT TABLES %s Fail:\n%s' % (tab, e)))
+        return None
 
 
 class baseThread(threading.Thread):
@@ -456,32 +486,29 @@ class baseThread(threading.Thread):
         self.func()
 
 
-def processWorker():  # combine thread(worker) /queue(task) / function(procedure)
+def processWorker():  # combine thread(worker)/queue(task)/function(procedure)
     while not inQueue.empty():  # 启动outQueue时队列已经稳定
         item = inQueue.get()  # 获得任务
-        retry = item[3]
+        f_code = item[0]
+        update_flag = item[1]
+        retry = item[2]
         try:
-            if item[1] == 'NAV':
-                fundSpiders.getFundNav(item[0], item[2], True,
-                                       True)  # fund_code, update = False(全量)/True(增量),silent_flag, multi_flag
-            elif item[1] == 'QUANTITY':
-                fundSpiders.getNavQuan(item[0])
-            else:
-                logger.exception('Processing function NOT specifified !')
-                pass
+            fundSpiders.getFundNav(f_code, update_flag, True, True)  # update = False(全量)/True(增量),silent, multi
             inQueue.task_done()
-            logger.info(' ' * 70 + '[' + item[0] + '] Done!')
-            time.sleep(process_sleep)
+            logger.info(' ' * 70 + f'[%s] Done!' % f_code)
+            time.sleep(thread_sleep)
         except Exception as e:
             if retry > 0:
-                logger.exception(str('processWorker FAIL [' + item[0] + '] - retry in queue!'))
-                inQueue.put([item[0], item[1], item[2], (retry - 1)])
+                logger.exception(f'processWorker FAIL [%s] - retry in queue!' % f_code)
+                inQueue.put([f_code, update_flag, (retry - 1)])
             else:
-                logger.exception(str('processWorker FAIL [' + item[0] + '] - reached max retry times! \n' + " %s" % e))
+                logger.exception(f'processWorker FAIL [%s] - reached max retry times! \n%s' % (f_code, e))
+                with open('./log/getNAVFail_%s.log' % dt.now().strftime('%Y-%m-%d'), 'a') as f:
+                    f.write(f_code)
                 inQueue.task_done()
 
 
-def IOWorker():  # combine thread(worker) /queue(task) / function(procedure)
+def IOWorker():  # combine thread(worker)/queue(task)/function(procedure)
     counter = 0
     tries = 0
     while True:
@@ -490,33 +517,82 @@ def IOWorker():  # combine thread(worker) /queue(task) / function(procedure)
             item = outQueue.get()
             try:
                 mySQL.insertData(item[0], item[1])  # 将结果存入数据库中
+            except:
+                with open('./log/importNAVFail_%s.log' % dt.now().strftime('%Y-%m-%d'), 'a') as f:
+                    f.write(item[1]['fund_code'])
             finally:
                 outQueue.task_done()
                 counter = counter + 1
-                if counter % 1000 == 0:
+                if counter % 2000 == 0:
                     logger.info('Importing Data - %d/%d' % (counter, outQueue.qsize()))
         else:
             tries = tries + 1
             if tries < 5:
-                time.sleep(15)
+                time.sleep(10)
                 logger.info('IO worker sleep - %d' % tries)
             else:
                 break
     logger.info('Finish importing Data - %d' % counter)
-    # TODO different table to execute many
+
+
+def processWorker_simple():  # combine thread(worker)/queue(task)/function(procedure)
+    while not inQueue.empty():  # 启动outQueue时队列已经稳定
+        item = inQueue.get()  # 获得任务
+        f_code = item[0]
+        fundSpiders.getFundInfo(f_code, True)  # update = False(全量)/True(增量),silent, multi
+        inQueue.task_done()
+        time.sleep(thread_sleep)
+
+
+def IOWorker_simple():  # combine thread(worker)/queue(task)/function(procedure)
+    counter = 0
+    tries = 0
+    while True:
+        if outQueue.qsize():  # 返回队列的大小
+            tries = 0
+            item = outQueue.get()
+            if item[0] == 'txt':
+                with open("./dep/0-doneFundCode.txt", 'a') as f:
+                    f.writelines(item[1])
+                    f.writelines('\n')
+            else:
+                try:
+                    mySQL.insertData(item[0], item[1])  # 将结果存入数据库中
+                    logger.info("新增基金代码-[%s]-%s" % (item[1]['fund_code'], item[1]['fund_name']))
+                except:
+                    pass
+                finally:
+                    outQueue.task_done()
+                    counter = counter + 1
+                    if counter % 2000 == 0:
+                        logger.info('Importing Data - %d/%d' % (counter, outQueue.qsize()))
+        else:
+            tries = tries + 1
+            if tries < 5:
+                time.sleep(10)
+                logger.info('IO worker sleep - %d' % tries)
+            else:
+                break
+    logger.info('Finish importing Data - %d' % counter)
 
 
 def welcome():
     logger.info('\nPlz input no. to execute commands:\n'
+                '0.Update FUND CODE LIST\n'
+                '\n'
                 '1.Update all NAV INFO\n'
-                '2.Update last 98 days NAV INFO\n'
-                '3.Just Check NAV INFO\n'
-                '4.Update all MANAGER INFO\n'
-                '5.Update all MANAGER HISTORY\n'
+                '2.Update last XX days NAV INFO\n'
+                '\n'
+                '3.Update all MANAGER INFO\n'
+                '4.Update all MANAGER HISTORY\n'
+                '\n'
+                '5.Exam fund data quality\n'  # TODO
+                '\n'
                 '6.Clean all MANAGER TABLE\n'
                 '7.Export all TABLES\n'
+                '\n'
                 '8.Update ONE FUND \n'
-                '0.Exit\n'
+                '9.Exit\n'
                 '\n'
                 'Command NO.: ')
     n = sys.stdin.readline().strip('\n')
@@ -528,81 +604,100 @@ def welcome():
 
 
 def main():
-    global mySQL, request_sleep, fundSpiders, inQueue, outQueue, lock, process_finish, process_sleep, fund_count, count, pgs
+    # init database instance
+    global mySQL
     mySQL = PyMySQL.PyMySQL()
     mySQL._init_(*db)
 
-    request_sleep = 0.2
+    # init threading
+    global request_sleep, inQueue, outQueue, lock, thread_finish, thread_sleep
+    request_sleep = 0.4
     inQueue = queue.Queue()
     outQueue = queue.Queue()
     lock = threading.Lock()
-    process_finish = False
-    process_sleep = 2
+    thread_finish = False
+    thread_sleep = 2
 
+    # init scrape instance
+    global fundSpiders, fund_count, count, req_rec
     fundSpiders = FundSpiders()
-    funds = fundSpiders.getFundCodesFromCsv()
+    fundSpiders.cleanFundCodesFromCsv(fund_file_path)
+    funds = fundSpiders.getFundCodesFromCsv(fund_file_path)
     fund_count = len(funds)
 
     while True:
+        # get command
         n = welcome()
         count = 0
-        multiProcessing = int(input('Number of process: '))
-        # multiProcessing = 100
+
+        # number of process
+        # threadNum = int(input('Number of threads: '))
+        threadNum = 30
 
         if (n == 1 or n == 2):  # 1.Update all NAV INFO/2.Update last 98 days NAV INFO
-            flag = (False if n == 1 else True)
-            pgs = int(input('Number of REC to retrive: '))
-            if multiProcessing <= 1:
-                [fundSpiders.getFundNav(fund, update=flag) for fund in funds]  # nav info, update = False(全量)/True(增量)
-            else:
-                start = time.time()
-                # create process queue ->fund_code/ func/ arg/ max retry time
-                [inQueue.put([fund, 'NAV', flag, 3]) for fund in funds]
+            update_flag = (False if n == 1 else True)
+            req_rec = int(input('Days of records to retrive: '))
 
-                threads = [baseThread(processWorker) for _ in range(multiProcessing)]  # create process thread
-                threads.append(baseThread(IOWorker))  # create IO thread
-                [thread.start() for thread in threads[:-1]]  # start process thread
-                time.sleep(30)
-                threads[-1].start()  # start IO thread
-                [thread.join() for thread in threads]  # wait until all process finishes tasks
-
-                logger.info('Time used multithreading scraping NAV: %s' % str(time.time() - start))
-
-        elif n == 3:  # 3.Just Check NAV INFO
-            # from internet
             start = time.time()
-            # build process queue ->fund_code/ func/ arg/ max retry time
-            [inQueue.put([fund, 'QUANTITY', None, 3]) for fund in funds]
+            # create process queue ->fund_code/ func/ arg/ max retry time
+            [inQueue.put([fund, 'NAV', update_flag, 3]) for fund in funds]
 
-            threads = [baseThread(processWorker) for _ in range(multiProcessing)]  # create process thread
+            threads = [baseThread(processWorker) for _ in range(threadNum)]  # create process thread
             threads.append(baseThread(IOWorker))  # create IO thread
             [thread.start() for thread in threads[:-1]]  # start process thread
             time.sleep(30)
             threads[-1].start()  # start IO thread
             [thread.join() for thread in threads]  # wait until all process finishes tasks
-            logger.info('Time used to multithreading scraping NAV quantity: %s ' % str(time.time() - start))
 
-            # to database
-            checkNAV()
+            logger.info('Time used multithreading scraping NAV: %s' % str(time.time() - start))
 
-        elif n == 4:  # 4.Update all MANAGER INFO
+        elif n == 3:  # 3.Update all MANAGER INFO
             # funds = funds[::-1]
             [fundSpiders.getFundManagers(fund) for fund in funds]  # manager info, 全量
 
-        elif n == 5:  # 5.Update all MANAGER HISTORY
+        elif n == 4:  # 4.Update all MANAGER HISTORY
             fundSpiders.getFundManagersHistory()  # manager history, 全量
 
+        elif n == 5:  # 5.Exam fund data quality
+            # exam fund data quality
+            fundsCheck = checkNAV()
+            if fundsCheck is None:
+                pass
+            else:
+                fundsAbnoraml = fundsCheck[fundsCheck['diff'].abs() >= 1]
+                # delete null fund data -> 0 nav records
+                fundsDel = fundsAbnoraml[fundsAbnoraml['quantity'] == 0]
+                fundsDelList = list(fundsDel.fund_code)
+                if len(fundsDelList) >= 1:
+                    format_strings = ','.join(['%s'] * len(fundsDelList))
+                    _sql = "DELETE FROM %s WHERE fund_code IN (%s)" % ('fund_info', format_strings)
+                    nrows = mySQL.sql(_sql, tuple(fundsDelList))
+                    logger.info('DELETED %d entries from %s for 0 NAV RECORDS' % (nrows, 'fund_info'))
+                # delete abnormal fund data -> mismatch data
+                fundsAbnoramlList = list(fundsAbnoraml.fund_code)
+                if len(fundsAbnoramlList) >= 1:
+                    fundsAbnoramlList = list(fundsAbnoraml.fund_code)
+                    format_strings = ','.join(['%s'] * len(fundsAbnoramlList))
+                    tabs = ['fund_managers_chg', 'nav', 'nav_currency', 'nav_quantity']
+                    for tab in tabs:
+                        _sql = "DELETE FROM %s WHERE fund_code IN (%s)" % (tab, format_strings)
+                        nrows = mySQL.sql(_sql, tuple(fundsAbnoramlList))
+                        logger.info('DELETED %d entries from %s for MISMATCHED/OUTDATED DATA' % (nrows, tab))
+                # output fund list to re-launch
+                fundsAbnoraml = fundsAbnoraml[fundsAbnoraml['quantity'] != 0]
+                fundsAbnoraml.to_csv("./dep/5-fundCode&Name.csv", index=False)
+            logger.info('PLZ re-launch and update NAV/MANAGER INFO from ABNORMAL LIST!!')
+
         elif n == 6:  # 6.Clean all MANAGER TABLE
-            tabs = ['fund_managers_info', 'fund_managers_chg', 'fund_managers_his']
+            tabs = ['managers_info', 'fund_managers_chg', 'managers_his']
             for tab in tabs:
                 _sql = 'DELETE FROM fund.%s where updated_date <\'%s\'' % (
                     tab, time.strftime('%Y-%m-%d', time.localtime(time.time())))
                 mySQL.sql(_sql)
         elif n == 7:  # 7.Export all TABLES
             # export
-            for tab in ['fund_info', 'fund_managers_info', 'fund_managers_chg', 'fund_nav', 'fund_nav_currency',
-                        'fund_managers_his']:
-                exportTable(tab)
+            for tab in ['fund_info', 'fund_managers_chg', 'managers_info', 'nav', 'nav_currency', 'managers_his']:
+                exportQuery(mySQL, tab)
 
         elif n == 8:  # 8.Update ONE FUND
             logger.info('\nPlz input FUND_CODE:\n')
@@ -614,8 +709,9 @@ def main():
             else:
                 logger.exception('INVALID INPUT\n')
 
-        elif n == 9:
-            print('TBC')
+        elif n == 0:  # 0.Update FUND CODE LIST/ MP
+            fundSpiders.updateFundCodesFromCsv()
+
         else:
             logger.info('Bye~')
             break

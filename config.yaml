@@ -1,0 +1,48 @@
+MySQL:
+  host: localhost
+  user: root
+  passwd: JONC
+  db: fund
+  port: 3306
+  charset: utf8
+
+DataProcess:
+  fit_frequency: BM
+  years_to_go: 3
+
+ManagerFilter:
+  annual_return_score: 0.03
+  cum_on_duty_term_pct: 0.3
+  annual_return_fund: 0.03
+  term: 0.6
+  weighted_annual_return_score: 0.035
+  mode: loose
+
+FundFilter:
+  isZero_coe: 0.5
+  return_mean_coe: 0.75
+  return_25_coe: 0.8
+  mode: auto
+
+Portfolio:
+  risk_free: 0.04
+  fit_frequency: BM
+  portfolio_nbr: [3]
+  years_to_go: 3
+
+NAVFile:
+  nav_path: './data/1-nav.csv'
+  cur_path: './data/1-nav_currency.csv'
+  res_path: './data/processed_nav_%s.dat'
+  cor_path: './data/covariance_nav_%s.dat'
+
+ManagerFile:
+  mana_his_path: './data/1-managers_his.csv'
+  mana_info_path: './data/1-managers_info.csv'
+  mana_chg_path: './data/1-fund_managers_chg.csv'
+  res_mana_chg_path: './data/2-MANAGER_CHG.csv'
+  res_mana_info_path: './data/2-MANAGER_INFO.csv'
+
+Backtest:
+  pct: 0.6
+  coe: 0.6

@@ -6,47 +6,17 @@ Created on Sun Nov 25 16:16:10 2018
 交易一期(基金)回测
 """
 import sys
+import traceback
 from datetime import datetime as dt
 
 import pandas as pd
-import seaborn as sns
 import yaml
-from pandas.tseries.offsets import BDay
 from sqlalchemy import create_engine
 
 from utils import PyMySQL, logger
+from utils.utils import select_date
 
 logger = logger.init_logger()
-
-
-def select_backtest_date(engine):
-    # customize backtest date
-    input_date = input('BACKTEST DATE(YYYY-MM-DD):')
-    if len(input_date) != 10:
-        backtest_date = dt.now()
-    else:
-        backtest_date = dt.strptime(input_date, '%Y-%m-%d')
-
-    # retrive latest available nav date
-    _sql = 'select date,count(*) from %s group by date order by date desc limit 10'
-    date_list = pd.read_sql_query(_sql % 'fund_nav', engine)
-    latest_nav_date = 0
-    for i in range(len(date_list)):
-        if date_list.iloc[i]['count(*)'] >= date_list['count(*)'].max() * 0.9:
-            latest_nav_date = dt.strptime(date_list.iloc[i]['date'], '%Y-%m-%d')
-    if latest_nav_date == 0:
-        logger.exception('NO ENOUGH DATA TO GO ON')
-        sys.exit()
-
-    # get pratical backtest date
-    backtest_date = min(backtest_date, latest_nav_date)
-    if backtest_date.weekday() < 5:
-        pass
-    else:
-        backtest_date = backtest_date - BDay(1)
-
-    logger.info('backtest date - %s' % str(backtest_date))
-    return backtest_date
 
 
 def load_data(engine, bk_date):
@@ -61,12 +31,11 @@ def load_data(engine, bk_date):
     tr_date = tuple(portfolio['train_date'].astype('str').unique())
 
     # nav
-    _sql = ('select * from %s where date in %s or date = \'%s\'' % ('fund_nav', tr_date, str(bk_date)[:10])).replace(
+    _sql = ('select * from %s where date in %s or date = \'%s\'' % ('nav', tr_date, str(bk_date)[:10])).replace(
         ',)', ')')
     nav = pd.read_sql_query(_sql, engine)
     nav['date'] = nav['date'].astype('datetime64[D]')
 
-    # TODO CUR_NAV
     return portfolio, nav
 
 
@@ -112,8 +81,7 @@ def backtest_data(portfolio):
 
     # growth of return
     portfolio['act_return'] = 0.0
-    cal_each_return = lambda x: ((x['last_add_nav_%d' % i] - x['add_nav_%d' % i]) / x['nav_%d' % i]) * x[
-        'portfolio_%d' % i]
+    cal_each_return = lambda x: (x['last_add_nav_%d' % i] / x['add_nav_%d' % i] - 1) * x['portfolio_%d' % i]
     for i in range(3):
         portfolio['act_return'] = portfolio['act_return'] + portfolio.apply(cal_each_return, axis=1)
 
@@ -132,23 +100,37 @@ def expire_portfolio(portfolio, expire_zero, config, mySQL):
     portfolio['expire'] = portfolio.apply(lambda x: 1 if x['top_act'] + x['achieve_exp'] == 0 else 0, axis=1)
 
     # write back expire info
-    expire_id = str(tuple(set(portfolio[portfolio['expire'] == 1].index).union(set(expire_zero.index))))
+    expire_id = portfolio[portfolio['expire'] == 1].index
     expire_date = str(dt.now().strftime('%Y-%m-%d'))
-    exp_sql = 'UPDATE fund_portfolio_3 SET expire_date= \'%s\' WHERE id IN %s;' % (expire_date, expire_id)
-    mySQL.sql(exp_sql)
+    if len(expire_id) > 1:
+        expire_id = str(tuple(set(expire_id).union(set(expire_zero.index))))
+        expire_date = str(dt.now().strftime('%Y-%m-%d'))
+        exp_sql = 'UPDATE fund_portfolio_3 SET expire_date= \'%s\' WHERE id IN %s;' % (expire_date, expire_id)
+        expire_cnt = mySQL.sql(exp_sql)
+    elif len(expire_id) == 1:
+        exp_sql = 'UPDATE fund_portfolio_3 SET expire_date= \'%s\' WHERE id = %s;' % (expire_date, expire_id[0])
+        expire_cnt = mySQL.sql(exp_sql)
+    else:
+        expire_cnt = 0
+
+    logger.info('%d portfolios has been expired' % expire_cnt)
 
 
-def export_backtest(portfolio, engine):
+def export_backtest(portfolio, engine, port_cnt):
     # export to backtest table
     backtest_col = ['id', 'exp_return', 'act_return', 'period', 'backtest_date', 'train_date', 'act_return_per']
     backtest = portfolio[portfolio['expire'] == 0].reset_index()[backtest_col]
-    # backtest = backtest[backtest['train_date'] < backtest['backtest_date']]
     if len(backtest) > 0:
-        backtest.to_sql('fund_backtest_3', con=engine, if_exists='append', index=False)
+        backtest.to_sql('fund_backtest_%d' % port_cnt, con=engine, if_exists='replace', index=False)
+        logger.info('%d backtest results has been saved' % len(backtest))
     return backtest
 
 
 def plot_10(col, type, engine):
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    sns.set()
+
     if type == 'history':
         # plot historical top 10 of portfolio
         _sql = 'select * from fund_backtest_3 where id in(select * from (select id from fund_backtest_3 order by %s desc limit 10) as t)'
@@ -158,9 +140,12 @@ def plot_10(col, type, engine):
 
     _10 = pd.read_sql_query(_sql % col, con=engine)
     _10 = _10[_10['act_return_per'].abs() <= 0.8]
-    sns.pointplot(x="backtest_date", y=col, hue="id", data=_10)
 
-    logger.info('%s top 10 by %s- %s' % (type.upper(), col, _10.id.unique()))
+    # lp = sns.pointplot(x="backtest_date", y=col, hue="id", data=_10)
+    # lp = sns.lineplot(x="backtest_date", y=col, hue="id", style="id", markers=True, data=_10)
+    lp = sns.lineplot(x="backtest_date", y=col, hue="id", data=_10)
+
+    plt.show()
 
 
 def params_perf(portfolio, engine):
@@ -169,7 +154,11 @@ def params_perf(portfolio, engine):
     params_pct = portfolio[portfolio['expire'] == 0].groupby(gp_key)[['exp_return', 'act_return']].mean().add_prefix(
         'avg_')
     params_pct['pct'] = params_pct['avg_act_return'] / params_pct['avg_exp_return']
-    params_pct.reset_index().to_sql('params_benchmark', con=engine, if_exists='replace', index=False)
+    params_pct['pct'] = params_pct['pct'].astype("str")
+    try:
+        params_pct.reset_index().to_sql('params_benchmark', con=engine, if_exists='replace', index=False)
+    except Exception:
+        logger.error(f'FAIL TO INSERT INTO PARAMS_BENCHMARK\n{traceback.format_exc()}')
 
 
 def welcome():
@@ -191,7 +180,8 @@ def welcome():
 
 
 def main():
-    config = yaml.load(open('./dep/config.yaml'))
+    port_cnt = 3  # TODO loop over port of 2/3/4
+    config = yaml.load(open('config.yaml'))
     db_con = config['MySQL']
     engine = create_engine(
         "mysql://%s:%s@%s/%s?charset=utf8mb4" % (db_con['user'], db_con['passwd'], db_con['host'], db_con['db']))
@@ -201,9 +191,7 @@ def main():
         n = welcome()
         if n == 1:
             # backtest date
-            bk_date = select_backtest_date(engine)
-
-            # TODO loop over 3/4/5
+            bk_date = select_date(engine)
 
             # load portfolio & nav
             portfolio, nav = load_data(engine, bk_date)
@@ -220,10 +208,10 @@ def main():
             mySQL.dispose()
 
             # export backtest
-            _ = export_backtest(portfolio, engine)
+            _ = export_backtest(portfolio, engine, port_cnt)
 
             # cal accuracy of the model by date
-            params_perf(portfolio, engine)
+            params_perf(portfolio, engine)  # TODO VIZ
 
         elif n == 2:
             # plot top 10 portfolio by actual cumulative return
@@ -236,10 +224,11 @@ def main():
             plot_10('act_return_per', 'recent', engine)
 
         elif n == 4:
-            _sql = 'select * from fund_portfolio_3 where id in (select * from (select id from fund_backtest_3 where backtest_date in (select max(backtest_date) from fund_backtest_3 ) order by act_return_per desc limit 100) as t)'
+            _sql = 'select * from fund_portfolio_%d where id in (select * from (select id from fund_backtest_%d where backtest_date in (select max(backtest_date) from fund_backtest_%d ) order by act_return_per desc limit 100) as t)' % (
+                port_cnt, port_cnt, port_cnt)
             _100 = pd.read_sql_query(_sql, con=engine)
             tall_port = pd.DataFrame()
-            for i in range(3):
+            for i in range(port_cnt):
                 tall_port = pd.concat([tall_port, _100[['fundCode_%d' % i, 'portfolio_%d' % i]].rename(
                     {'fundCode_%d' % i: 'fundCode', 'portfolio_%d' % i: 'portfolio'}, axis=1)], axis=0)
             piv_port = tall_port.groupby('fundCode').sum().rename({'portfolio': 'total weight'}, axis=1)
@@ -249,7 +238,7 @@ def main():
             logger.info('Most weighted fund: \n%s' % piv_port)
 
         elif n == 5:
-            _sql = 'selec COUNT(*) as cnt from (SELECT distinct ID FROM fund.fund_portfolio_3 where expire_date is null) as t'
+            _sql = 'select COUNT(*) as cnt from (SELECT distinct ID FROM fund.fund_portfolio_%d where expire_date is null) as t' % port_cnt
             cnt = pd.read_sql_query(_sql, con=engine)['cnt'][0]
             logger.info('%d effective portfolio' % cnt)
 
