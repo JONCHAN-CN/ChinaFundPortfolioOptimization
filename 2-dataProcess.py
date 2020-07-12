@@ -17,7 +17,7 @@ from utils import logger as lg
 from utils.decorator import *
 from utils.utils import *
 
-logger = lg.init_logger()
+logger = lg.init_logger('./log/2-dataProcess_%s.log' % dt.now().strftime('%Y-%m-%d'))
 
 
 @try_exception

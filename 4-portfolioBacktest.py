@@ -13,10 +13,10 @@ import pandas as pd
 import yaml
 from sqlalchemy import create_engine
 
-from utils import PyMySQL, logger
+from utils import PyMySQL, logger as lg
 from utils.utils import select_date
 
-logger = logger.init_logger()
+logger = lg.init_logger('./log/4-portBacktest_%s.log' % dt.now().strftime('%Y-%m-%d'))
 
 
 def load_data(engine, bk_date):
@@ -211,7 +211,7 @@ def main():
             _ = export_backtest(portfolio, engine, port_cnt)
 
             # cal accuracy of the model by date
-            params_perf(portfolio, engine)  # TODO VIZ
+            params_perf(portfolio, engine)  # TODO
 
         elif n == 2:
             # plot top 10 portfolio by actual cumulative return

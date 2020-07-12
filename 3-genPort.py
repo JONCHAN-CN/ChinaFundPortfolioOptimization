@@ -20,7 +20,7 @@ from utils.decorator import *
 from utils.utils import *
 
 solvers.options['show_progress'] = False  # Turn off progress printing
-logger = lg.init_logger()
+logger = lg.init_logger('./log/3-genPort_%s.log' % dt.now().strftime('%Y-%m-%d'))
 
 
 class HarryMarkowitz:
