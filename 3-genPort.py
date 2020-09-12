@@ -258,10 +258,10 @@ def formating_proc(nbr, train_date, out_queue, risk_free, fit_frequency):
         else:
             awake = 0
 
-            if out_queue.qsize() < 2000:
+            if out_queue.qsize() < 3000:
                 epoch = 1
             else:
-                epoch = 2000
+                epoch = 1000
             id_port_return_risk = []
             for i in range(3 * epoch):
                 for_count = for_count + 1

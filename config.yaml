@@ -1,7 +1,7 @@
 MySQL:
   host: localhost
   user: root
-  passwd: JONC
+  passwd:
   db: fund
   port: 3306
   charset: utf8
@@ -11,17 +11,17 @@ DataProcess:
   years_to_go: 3
 
 ManagerFilter:
-  annual_return_score: 0.03
-  cum_on_duty_term_pct: 0.3
-  annual_return_fund: 0.03
-  term: 0.6
-  weighted_annual_return_score: 0.035
+  annual_return_score: 0.08
+  cum_on_duty_term_pct: 0.4
+  annual_return_fund: 0.125
+  term: 2
+  weighted_annual_return_score: 0.05
   mode: loose
 
 FundFilter:
-  isZero_coe: 0.5
-  return_mean_coe: 0.75
-  return_25_coe: 0.8
+  isZero_coe: 0.3
+  return_mean_coe: 1.25
+  return_25_coe: 1.25
   mode: auto
 
 Portfolio:

@@ -82,19 +82,20 @@ class FundSpiders():
                     latest_time = t
                     latest_log = f
 
-        expired_codes = []
-        with open(latest_log, "r") as f:
-            for l in f.readlines():
-                if "共0/0行" in l:
-                    expired_codes.append(l.split("[")[-1].split("]")[0])
+        if latest_log != "":
+            expired_codes = []
+            with open(latest_log, "r") as f:
+                for l in f.readlines():
+                    if "共0/0行" in l:
+                        expired_codes.append(l.split("[")[-1].split("]")[0])
 
-        fund_code = pd.read_csv(fund_file_path, dtype=str)
-        fund_code['expire'] = fund_code.apply(lambda x: 1 if x['fund_code'] in expired_codes else 0, axis=1)
-        fund_code = fund_code[fund_code['expire'] == 0].drop(labels=['expire'], axis=1)
+            fund_code = pd.read_csv(fund_file_path, dtype=str)
+            fund_code['expire'] = fund_code.apply(lambda x: 1 if x['fund_code'] in expired_codes else 0, axis=1)
+            fund_code = fund_code[fund_code['expire'] == 0].drop(labels=['expire'], axis=1)
 
-        fund_code.to_csv(fund_file_path, index=False)
+            fund_code.to_csv(fund_file_path, index=False)
 
-        logger.info(f'{len(expired_codes)} fund codes expired, {fund_code.shape[0]} left')
+            logger.info(f'{len(expired_codes)} fund codes expired, {fund_code.shape[0]} left')
 
     def getFundCodesFromCsv(self, fund_file_path):
         """从csv文件中获取基金代码清单（可从wind或者其他财经网站导出）"""
@@ -333,6 +334,7 @@ class FundSpiders():
                         result['div_record'] = tr.select('td:nth-of-type(7)')[0].getText().strip().strip('\'')
                         result['created_date'] = self.getCurrentTime()
                         result['updated_date'] = self.getCurrentTime()
+                        # print(result)
 
                         if multi:
                             lock.acquire()
@@ -632,7 +634,7 @@ def main():
 
         # number of process
         # threadNum = int(input('Number of threads: '))
-        threadNum = 30
+        threadNum = 20
 
         if (n == 1 or n == 2):  # 1.Update all NAV INFO/2.Update last 98 days NAV INFO
             update_flag = (False if n == 1 else True)
@@ -696,7 +698,7 @@ def main():
                 mySQL.sql(_sql)
         elif n == 7:  # 7.Export all TABLES
             # export
-            for tab in ['fund_info', 'fund_managers_chg', 'managers_info', 'nav', 'nav_currency', 'managers_his']:
+            for tab in ['fund_info', 'fund_managers_chg', 'managers_info', 'managers_his', 'nav', 'nav_currency']:
                 exportQuery(mySQL, tab)
 
         elif n == 8:  # 8.Update ONE FUND
